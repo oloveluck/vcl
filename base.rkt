@@ -1,6 +1,6 @@
 #lang racket/base
 
-;;; base.rkt — the module language for #lang fhir/vcl.
+;;; base.rkt — the module language for #lang vcl.
 ;;;
 ;;; The reader hands over the file's single VCL expression as (vcl-source "…"). The module
 ;;; language parses it AT COMPILE TIME (a bad expression is a syntax error, like every other lang
@@ -12,7 +12,7 @@
 ;;; `main` prints the ValueSet JSON.
 
 (require (for-syntax racket/base
-                     (only-in fhir/vcl/parser/parse parse-vcl)
+                     (only-in vcl/parser/parse parse-vcl)
                      (only-in fhir/result/result ok? err-error)
                      (only-in fhir/result/result validation-error-message))
          json

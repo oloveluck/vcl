@@ -1,11 +1,12 @@
-# CLAUDE.md — fhir-vcl
+# CLAUDE.md — vcl
 
 Conventions, HTDP design style, and the conformance ratchet table live in the main `fhir` repo's
-CLAUDE.md (`~/Projects/fhir`); this file holds only the notes for this package. Cross-directory
-imports use collection paths (`fhir/model/node`, never `../model/node.rkt`): the family of packages
-splices into the one `fhir` collection, so a directory can move between repos without edits.
+CLAUDE.md (`~/Projects/fhir`); this file holds only the notes for this package. This repo root IS the
+`vcl` collection (`(define collection "vcl")`): modules are `vcl/compile` etc., and imports of the
+foundation use collection paths (`fhir/model/node`, never a relative path into another package).
+The CLI is `cli.rkt` (`raco vcl`); the conformance runner(s) live in `tests/` behind `--tck`.
 
-## VCL lang (`#lang fhir/vcl`, `vcl/`)
+## VCL lang (`#lang vcl`, `vcl/`)
 VCL — the ValueSet Compose Language (build.fhir.org/ig/FHIR/ig-guidance/vcl.html), a compact
 URL-embeddable syntax for ValueSet composes — as the 5th brag lang. `vcl/parser/vcl.g4` is the
 official ANTLR grammar vendored verbatim; `grammar.rkt` ports it rule-for-rule (documented
@@ -20,7 +21,7 @@ enumerations, bare `*`) errs clearly. `vcl-print` re-brackets compound members (
 `,`/`;` precedence). `vcl/decompile.rkt` is the reverse (compose→VCL; nested filter values
 reparse via the real grammar). Conformance: all **60 spec examples** (vendored,
 `vcl/tests/vendor/`) parse AND survive the print∘parse fixpoint; compose round-trip law tested.
-`#lang fhir/vcl` (one expression per file; parse errors are COMPILE errors) provides
+`#lang vcl` (one expression per file; parse errors are COMPILE errors) provides
 source/expression/compose/valueset; `raco fhir vcl <expr>` prints the ValueSet. **Implicit VCL
 ValueSets work in `$expand`**: `terminology/service.rkt` recognizes `http://fhir.org/VCL?v1=…`,
 percent-decodes (spec SHALL), compiles, and expands against its index — so `%terminologies` and

@@ -1,12 +1,12 @@
 #lang s-exp syntax/module-reader
 
-;;; reader.rkt — the #lang fhir/vcl reader.
+;;; reader.rkt — the #lang vcl reader.
 ;;;
 ;;; A .vcl file is ONE VCL expression (whitespace-trimmed; the spec prohibits newlines inside an
 ;;; expression, but the file may end with one). The reader emits a single (vcl-source "…") form;
-;;; the module language fhir/vcl/base parses/compiles it.
+;;; the module language vcl/base parses/compiles it.
 
-fhir/vcl/base
+vcl/base
 
 #:read        vcl-read
 #:read-syntax vcl-read-syntax

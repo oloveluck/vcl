@@ -1,12 +1,11 @@
 #lang info
 
-;; fhir-vcl — part of the `fhir` family of Racket packages (FHIR as a family of #langs).
-;; Every package in the family declares `(define collection "fhir")`, so they splice into the
-;; one `fhir` collection: module paths (fhir/...) and #lang names are the same as in the monorepo.
-
-(define collection "fhir")
-(define version "0.2")
-(define pkg-desc "VCL (ValueSet Compose Language) for Racket: parser, compiler to ValueSet.compose, decompiler and #lang fhir/vcl")
+(define collection "vcl")
+(define version "0.3")
+(define pkg-desc "VCL (ValueSet Compose Language) for Racket: parser, compiler to ValueSet.compose, decompiler, #lang vcl and raco vcl")
 (define pkg-authors '(oloveluck))
-(define deps '("base" "fhir-core" "brag-lib" "br-parser-tools-lib"))
+(define license 'MIT)
+(define deps '("base" "fhir" "brag-lib" "br-parser-tools-lib"))
 (define build-deps '("rackunit-lib"))
+(define raco-commands '(("vcl" (submod vcl/cli main) "compile a VCL expression to a ValueSet; decompile a ValueSet to VCL" #f)))
+(define test-omit-paths '("tests/vendor"))
