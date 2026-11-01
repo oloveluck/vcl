@@ -1,0 +1,4 @@
+examples.txt — every VCL expression from the spec page's "VCL Examples" table and
+"Additional Examples" list, one per line, extracted from
+https://raw.githubusercontent.com/FHIR/ig-guidance/master/input/pagecontent/vcl.md
+retrieved 2026-08-24. These are the parse-conformance corpus for vcl/.

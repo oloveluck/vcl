@@ -1,0 +1,4 @@
+vcl.g4 — the official VCL (ValueSet Compose Language) ANTLR grammar, extracted verbatim from
+https://raw.githubusercontent.com/FHIR/ig-guidance/master/input/pagecontent/vcl.md
+(the source of https://build.fhir.org/ig/FHIR/ig-guidance/vcl.html), retrieved 2026-08-24.
+The brag grammar (grammar.rkt) is a rule-for-rule port; deviations are documented there.
