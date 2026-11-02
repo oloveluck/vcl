@@ -13,6 +13,7 @@
 
 (require brag/support
          br-parser-tools/lex
+         (only-in fhir/diagnostic diagnostic loc raise-diagnostic exn:fail:diagnostic?)
          (prefix-in : br-parser-tools/lex-sre)
          racket/contract)
 
@@ -23,7 +24,7 @@
 (define (unescape s) (regexp-replace* #px"\\\\([\"\\\\])" s "\\1"))
 
 (define vcl-lexer
-  (lexer
+  (lexer-srcloc
    [(eof) (void)]
    [(:or " " "\t") (token 'WS lexeme #:skip? #t)]
    [(:or "\n" "\r") (error 'vcl "newlines are not permitted in a VCL expression")]
@@ -62,9 +63,34 @@
    [";"   (token 'SEMI lexeme)]
    [","   (token 'COMMA lexeme)]))
 
+;; positioned : lexer-srcloc result -> token   the token with its line/column/position/span, so brag
+;; reports parse errors there (token accessors downstream are unchanged); unmatched text is a
+;; positioned LEX diagnostic (fhir/diagnostic)
+(define (positioned t)
+  (cond [(srcloc-token? t)
+         (define tok (srcloc-token-token t))
+         (define sl (srcloc-token-srcloc t))
+         (if (token-struct? tok)
+             (token (token-struct-type tok) (token-struct-val tok)
+                    #:line (srcloc-line sl) #:column (srcloc-column sl)
+                    #:position (srcloc-position sl) #:span (srcloc-span sl)
+                    #:skip? (token-struct-skip? tok))
+             tok)]
+        [else t]))
+(define ((positioned-lexer lang lex) ip)
+  (define-values (line col pos) (port-next-location ip))
+  (with-handlers ([(lambda (e) (and (exn:fail? e) (not (exn:fail:diagnostic? e))))
+                   (lambda (e)
+                     (define rest (let ([s (peek-string 30 0 ip)]) (if (eof-object? s) "" s)))
+                     (raise-diagnostic (diagnostic lang 'lex 'error
+                                                   (format "unrecognized text `~a`" (car (regexp-split #rx"[ \t\r\n]" rest)))
+                                                   (loc #f line (and col (add1 col)) pos #f))))])
+    (positioned (lex ip))))
+
 (define (tokenize ip)
-  (define (next-token) (vcl-lexer ip))
-  next-token)
+  (port-count-lines! ip)
+  (define next (positioned-lexer 'vcl vcl-lexer))
+  (lambda () (next ip)))
 
 (module+ test
   (require rackunit)

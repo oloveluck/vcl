@@ -12,14 +12,30 @@
          (only-in racket/string string-trim)
          (only-in vcl/compile vcl->valueset)
          (only-in vcl/decompile compose->vcl)
-         (only-in fhir/result/result ok? ok-value err-error validation-error-message))
+         (only-in fhir/result/result ok? ok-value err-error validation-error-message)
+         (only-in fhir/diagnostic diagnostic diagnostic-loc loc attached-diagnostic emit-diagnostics format-flag))
 
 (provide compile-expression decompile-file)
 
 ;; compile-expression : string -> void   print the ValueSet JSON for a VCL expression, or exit 1
-(define (compile-expression expr)
+;; report : diagnostic text -> exit 1   (format from --format)
+(define current-format (make-parameter 'text))
+(define (report d text)
+  (emit-diagnostics (list d) #:format (current-format) #:text-of (lambda (_) text))
+  (exit 1))
+(define (with-source d source)
+  (define l (diagnostic-loc d))
+  (struct-copy diagnostic d [loc (if l (struct-copy loc l [source source]) (loc source #f #f #f #f))]))
+
+;; compile-expression : string [source] -> void   print the ValueSet JSON for a VCL expression, or exit 1
+(define (compile-expression expr [source "<expression>"])
   (define r (vcl->valueset expr))
-  (unless (ok? r) (eprintf "vcl: ~a\n" (validation-error-message (err-error r))) (exit 1))
+  (unless (ok? r)
+    (define e (err-error r))
+    (report (with-source (or (attached-diagnostic e)
+                             (diagnostic 'vcl 'compile 'error (validation-error-message e) #f))
+                         source)
+            expr))
   (displayln (jsexpr->string (ok-value r))))
 
 ;; decompile-file : path-string -> void   print the VCL for a ValueSet (or a bare compose) JSON file
@@ -33,12 +49,15 @@
   (exit 2))
 
 (module+ main
-  (define args (vector->list (current-command-line-arguments)))
+  (define-values (fmt args) (format-flag (vector->list (current-command-line-arguments))))
+  (current-format fmt)
   (cond
     [(null? args) (usage)]
     [(equal? (car args) "--decompile") (if (= (length args) 2) (decompile-file (cadr args)) (usage))]
     [(regexp-match? #rx"^-" (car args)) (usage)]
     [(file-exists? (car args))
      ;; a .vcl file: one expression, optional #lang line, trailing newline allowed
-     (compile-expression (string-trim (regexp-replace #px"^#lang[^\n]*\n" (file->string (car args)) "")))]
+     ;; (the #lang line is blanked, not removed, so positions stay true)
+     (compile-expression (string-trim (regexp-replace #px"^#lang[^\n]*" (file->string (car args)) "") #px"\\s+$" #:left? #f)
+                         (car args))]
     [else (compile-expression (car args))]))
