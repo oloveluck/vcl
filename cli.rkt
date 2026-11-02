@@ -44,14 +44,24 @@
   (define compose (if (and (hash? js) (hash-has-key? js 'compose)) (hash-ref js 'compose) js))
   (displayln (compose->vcl compose)))
 
-(define (usage)
-  (eprintf "usage: raco vcl '<expression>' | <file.vcl>\n       raco vcl --decompile <valueset.json>\n")
-  (exit 2))
+(define (usage [code 2])                             ; --help: stdout, exit 0
+  ((if (zero? code) printf eprintf) "usage: raco vcl '<expression>' | <file.vcl>\n       raco vcl --decompile <valueset.json>\n")
+  (exit code))
 
 (module+ main
   (define-values (fmt args) (format-flag (vector->list (current-command-line-arguments))))
   (current-format fmt)
+  ;; an unreadable input file is a one-line error (exit 2), not a stack trace
+  (let ([default (uncaught-exception-handler)])
+    (uncaught-exception-handler
+     (lambda (e)
+       (cond [(exn:fail:filesystem? e)
+              (define m (regexp-match #px"path: ([^\n]*)" (exn-message e)))
+              (eprintf "vcl: cannot read ~a\n" (if m (cadr m) (exn-message e)))
+              (exit 2)]
+             [else (default e)]))))
   (cond
+    [(ormap (lambda (a) (member a '("-h" "--help"))) args) (usage 0)]
     [(null? args) (usage)]
     [(equal? (car args) "--decompile") (if (= (length args) 2) (decompile-file (cadr args)) (usage))]
     [(regexp-match? #rx"^-" (car args)) (usage)]
