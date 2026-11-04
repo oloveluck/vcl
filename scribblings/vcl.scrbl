@@ -86,6 +86,19 @@ raco vcl --decompile valueset.json                the VCL of a ValueSet's compos
 @litchar{--format text|json|outcome} chooses how an error is reported. Exit codes: 0, 1 on a VCL error,
 2 on usage.
 
+@section{Limits}
+
+@itemlist[
+@item{What a compose cannot say is an error: an exclusion below the top level, a conjunction with a
+plain code, value set or @tt{*} in it, conflicting systems in one conjunction, a bare @tt{*}.}
+@item{A nested filter list or an @tt{of} source goes into @tt{filter.value} as VCL text.}
+@item{When the terminology service expands a VCL value set, the operators @tt{>>} (generalizes),
+@tt{!!<} (descendent-leaf) and @tt{of} match nothing.}
+@item{Decompiling is lossy: an include with both concepts and filters keeps the concepts; displays,
+designations and the compose's @tt{inactive} and @tt{lockedDate} are dropped. The implicit url
+escapes spaces only.}
+@item{The grammar admits a one-code list, @tt{{a}}, which the official grammar does not.}]
+
 @section{Reference}
 
 @subsection[#:style 'unnumbered]{@hash-lang[] @tt{vcl}}
