@@ -18,7 +18,8 @@
          json
          (only-in "parser/parse.rkt" parse-vcl)
          (only-in "compile.rkt" vcl->compose vcl->valueset)
-         (only-in fhir/result/result ok-value ok-or-raise))
+         (only-in fhir/result/result ok-value ok-or-raise)
+         (only-in fhir/registry register-resources!))
 
 (provide (except-out (all-from-out racket/base) #%module-begin)
          (rename-out [vcl-module-begin #%module-begin])
@@ -39,6 +40,9 @@
    (define expression (ok-or-raise (parse-vcl source)))
    (define compose (ok-or-raise (vcl->compose expression)))
    (define valueset (ok-or-raise (vcl->valueset source)))
+   ;; the module system as the FHIR registry: the value set resolves by its url once the module
+   ;; is required (`$expand #:url`, a binding's value set)
+   (register-resources! (list valueset) #:source (variable-reference->module-source (#%variable-reference)))
    (provide source expression compose valueset)
    (module+ main
      (displayln (jsexpr->string valueset)))))
