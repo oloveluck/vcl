@@ -11,7 +11,7 @@
 ;;;   valueset   : the full ValueSet resource jsexpr (url = the implicit VCL url)
 ;;; `main` prints the ValueSet JSON.
 
-(require (for-syntax racket/base
+(require (for-syntax racket/base syntax/parse
                      (only-in vcl/parser/parse parse-vcl)
                      (only-in fhir/result/result ok? err-error)
                      (only-in fhir/result/result validation-error-message))
@@ -34,7 +34,17 @@
          (raise-syntax-error 'vcl (validation-error-message (err-error r)) stx))
        #'src)]))
 
-(define-syntax-rule (vcl-module-begin src-form)
+;; the module body the reader produces: exactly one (vcl-source "…") form
+(begin-for-syntax
+  (define-syntax-class source-form
+    #:description "one (vcl-source \"…\") form, as the #lang vcl reader writes it"
+    (pattern ((~datum vcl-source) src:str))))
+
+(define-syntax (vcl-module-begin stx)
+  (syntax-parse stx
+    [(_ form:source-form) #'(vcl-module-body form)]))
+
+(define-syntax-rule (vcl-module-body src-form)
   (#%module-begin
    (define source src-form)
    (define expression (ok-or-raise (parse-vcl source)))
