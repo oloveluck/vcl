@@ -31,6 +31,8 @@ jobs:
             "$PWD" \
             "https://github.com/oloveluck/fhir.git?path=fhir" \
             "https://github.com/oloveluck/fhir.git?path=fhir-spec"
+      - name: The spec's examples (parse and fixpoint) and the module tests
+        run: raco test tests/parse-test.rkt compile.rkt decompile.rkt parser/parse.rkt base.rkt
       - name: Build the documentation
         run: |
           raco scribble +m --html --dest site --dest-name index.html --redirect-main https://docs.racket-lang.org/ scribblings/vcl.scrbl
