@@ -56,7 +56,8 @@ url, @tt{http://fhir.org/VCL?v1=…}). A parse error is a compile error of the r
 @racketblock[
 (require (only-in "bp-panels.vcl" [valueset bp-panels])
          (only-in fhir/terminology/operations $expand))       (code:comment "fhir-validation")
-(hash-ref ($expand #:valueSet bp-panels) 'expansion)          (code:comment "the codes, via the terminology service")
+(code:comment "the codes, via the terminology service")
+(hash-ref ($expand #:valueSet bp-panels) 'expansion)
 ]
 
 The terminology service also expands an implicit VCL url given anywhere a ValueSet url is expected
@@ -66,9 +67,12 @@ The terminology service also expands an implicit VCL url given anywhere a ValueS
 
 @racketblock[
 (require vcl/compile vcl/decompile fhir/result/result)
-(ok-value (vcl->valueset "(http://loinc.org)(85354-9;55284-4)"))    (code:comment "a ValueSet jsexpr")
-(ok-value (vcl->compose "(http://loinc.org)(85354-9;55284-4)"))     (code:comment "just the compose")
-(compose->vcl (hash-ref vs 'compose))                               (code:comment "back to text")
+(code:comment "a ValueSet jsexpr")
+(ok-value (vcl->valueset "(http://loinc.org)(85354-9;55284-4)"))
+(code:comment "just the compose")
+(ok-value (vcl->compose "(http://loinc.org)(85354-9;55284-4)"))
+(code:comment "back to text")
+(compose->vcl (hash-ref vs 'compose))
 ]
 
 @bold{Command line.}
@@ -79,7 +83,7 @@ raco vcl expression.vcl                           the same, from a file
 raco vcl --decompile valueset.json                the VCL of a ValueSet's compose
 }
 
-@tt{--format text|json|outcome} chooses how an error is reported. Exit codes: 0, 1 on a VCL error,
+@litchar{--format text|json|outcome} chooses how an error is reported. Exit codes: 0, 1 on a VCL error,
 2 on usage.
 
 @section{Reference}
