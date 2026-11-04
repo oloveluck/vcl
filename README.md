@@ -4,6 +4,7 @@ VCL (build.fhir.org/ig/FHIR/ig-guidance/vcl.html), the compact URL-embeddable sy
 
 Part of **fhir — FHIR as a family of Racket `#lang`s** ([oloveluck/fhir](https://github.com/oloveluck/fhir)).
 Collection `vcl`. `#lang vcl` — a `.vcl` file is a module; `racket file` prints the compiled JSON.
+Reference: [oloveluck.github.io/vcl](https://oloveluck.github.io/vcl/).
 
 ## Install
 
