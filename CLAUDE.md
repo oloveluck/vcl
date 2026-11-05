@@ -26,3 +26,7 @@ source/expression/compose/valueset; `raco fhir vcl <expr>` prints the ValueSet. 
 ValueSets work in `$expand`**: `terminology/service.rkt` recognizes `http://fhir.org/VCL?v1=…`,
 percent-decodes (spec SHALL), compiles, and expands against its index — so `%terminologies` and
 the validator see VCL urls as real ValueSets.
+
+**Editor and agent support** (`support.rkt`, through `fhir/lang/support`): a document's diagnostics
+(the one expression compiled to a compose) and the tool `vcl_valueset`; the LSP and MCP hubs load it by
+collection name.
