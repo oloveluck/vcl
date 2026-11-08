@@ -30,3 +30,8 @@ the validator see VCL urls as real ValueSets.
 **Editor and agent support** (`support.rkt`, through `fhir/lang/support`): a document's diagnostics
 (the one expression compiled to a compose) and the tool `vcl_valueset`; the LSP and MCP hubs load it by
 collection name.
+
+**Workspace support** (`workspace.rkt`): each `.vcl` file is the ValueSet `<canonical>/ValueSet/<stem>`
+(name from the stem); `run` expands it by `$expand` (fhir-tx, dynamic-required — it depends on vcl),
+else lists the enumerated codes and says so; `explain` of `system|code` evaluates each include and
+exclude of the compose alone (printed back as VCL) and says which hold the code.
