@@ -100,9 +100,9 @@ find it by url. @tt{racket bp-panels.vcl} prints the ValueSet.
 
 @section{In an editor, for an agent}
 
-@tt{vcl/support} is what the family's language server (fhir-lsp) and MCP server (fhir-mcp) load for
-VCL: a document's diagnostics (the one expression compiled to a compose) and the tool
-@tt{vcl_valueset}. It is a @tt{fhir/lang/support} value.
+@tt{vcl/support} is what the family's language server (fhir-lsp) loads for VCL: a document's
+diagnostics (the one expression compiled to a compose). @tt{vcl/workspace} is what fhir-mcp runs for
+an agent: a file's ValueSet, expanded, and which part of the expression holds a code.
 
 @section{Limits}
 

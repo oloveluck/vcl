@@ -28,8 +28,7 @@ percent-decodes (spec SHALL), compiles, and expands against its index — so `%t
 the validator see VCL urls as real ValueSets.
 
 **Editor and agent support** (`support.rkt`, through `fhir/lang/support`): a document's diagnostics
-(the one expression compiled to a compose) and the tool `vcl_valueset`; the LSP and MCP hubs load it by
-collection name.
+(the one expression compiled to a compose); the language server loads it by collection name.
 
 **Workspace support** (`workspace.rkt`): each `.vcl` file is the ValueSet `<canonical>/ValueSet/<stem>`
 (name from the stem); `run` expands it by `$expand` (fhir-tx, dynamic-required — it depends on vcl),
