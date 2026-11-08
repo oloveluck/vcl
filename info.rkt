@@ -2,7 +2,7 @@
 
 (define collection "vcl")
 (define version "0.3")
-(define pkg-desc "VCL (ValueSet Compose Language) for Racket: parser, compiler to ValueSet.compose, decompiler, #lang vcl and raco vcl")
+(define pkg-desc "VCL (ValueSet Compose Language): parser, compiler to ValueSet.compose, decompiler; the vcl command-line tool and #lang vcl")
 (define pkg-authors '(oloveluck))
 (define license 'MIT)
 (define deps '("base" "fhir" "brag-lib" "br-parser-tools-lib"))

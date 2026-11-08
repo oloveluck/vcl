@@ -1,7 +1,7 @@
 #lang scribble/manual
 @(require (for-label racket/base racket/contract vcl/parser/parse vcl/compile vcl/decompile))
 
-@title{vcl: the ValueSet Compose Language for Racket}
+@title{vcl: the ValueSet Compose Language}
 
 @hyperlink["https://build.fhir.org/ig/FHIR/ig-guidance/vcl.html"]{VCL} is the compact,
 URL-embeddable syntax for a ValueSet's @tt{compose}: one expression names the codes. This package
