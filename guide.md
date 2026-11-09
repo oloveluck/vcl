@@ -84,7 +84,9 @@ An expression that does not parse or compile is reported where it stops (`--form
 **Expanding.** The terminology service (fhir-tx) reads a VCL url as a ValueSet:
 `fhir-tx expand 'http://fhir.org/VCL?v1=(http://hl7.org/fhir/administrative-gender)(male;female)'`
 lists the codes, with displays, from the code systems in its packages. Codes a VCL expression
-enumerates are members without any code system; a filter needs the code system's content.
+enumerates are members without any code system; a filter needs the code system's content. The
+`$expand` and `$validate-code` operations take a VCL url as their `url` the same way, registered or
+not.
 
 **As a module.** A file that starts with `#lang vcl` holds one expression and is a Racket module
 providing `source`, `expression` (the AST), `compose` and `valueset`. The expression is checked when

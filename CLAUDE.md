@@ -47,6 +47,7 @@ bindings. Writing them found and fixed: `raco vcl <file>` rejected EVERY file wi
 line (blanking the line kept a newline, which VCL's lexer forbids; the line is now removed and a
 diagnostic moved back to the file's line), and a `#lang vcl` module's parse error was positioned in
 the bare expression (`<input>:1:28`), not the file (the reader now gives the string its srcloc and
-the macro raises at the exact character). Found, not fixed (fhir-tx): `$expand`'s `url` input does
-not compile an unregistered VCL url, though `raco fhir-tx expand` and `%terminologies` do.
+the macro raises at the exact character). Also found then, and fixed in fhir-tx: `$expand`'s and
+`$validate-code`'s `url` input did not compile an unregistered VCL url (the operations' resolver now
+falls back to the implicit VCL ValueSet, as `raco fhir-tx expand` and `%terminologies` did).
 

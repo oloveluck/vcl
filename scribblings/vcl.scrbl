@@ -116,9 +116,6 @@ plain code, value set or @tt{*} in it, conflicting systems in one conjunction, a
 @item{A nested filter list or an @tt{of} source goes into @tt{filter.value} as VCL text.}
 @item{When the terminology service expands a VCL value set, @tt{of} matches nothing (every other
 operator expands, @tt{>>} and @tt{!!<} included).}
-@item{The @tt{$expand} operation finds a VCL url that a module or a workspace has registered; an
-unregistered VCL url is expanded by @tt{raco fhir-tx expand} and FHIRPath's @tt{%terminologies}, which
-compile it on the fly, but not by @tt{$expand}'s @tt{url} input.}
 @item{Decompiling is lossy: an include with both concepts and filters keeps the concepts; displays,
 designations and the compose's @tt{inactive} and @tt{lockedDate} are dropped. The implicit url
 escapes spaces only.}
