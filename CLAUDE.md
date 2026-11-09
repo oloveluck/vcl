@@ -34,3 +34,19 @@ the validator see VCL urls as real ValueSets.
 (name from the stem); `run` expands it by `$expand` (fhir-tx, dynamic-required — it depends on vcl),
 else lists the enumerated codes and says so; `explain` of `system|code` evaluates each include and
 exclude of the compose alone (printed back as VCL) and says which hold the code.
+
+**Documentation for users and agents** (2026-11-09; the family's pattern, see the main repo's
+CLAUDE.md). `guide.md` is the language for agents — cheat sheet, the operator table, a worked
+example, what a compose cannot say, running it, common problems — provided by `vcl/workspace` as
+`guide` (fhir-mcp's `learn://vcl`); `tests/guide-test.rkt` compiles every ```vcl block and checks
+its claims (the operator table against the compiler, the worked example's compose and url, the
+refusals, the command line on a `#lang vcl` file). `.claude/skills/vcl/SKILL.md` is the workflow
+without MCP (every command in it was run). `scribblings/vcl.scrbl` is the manual;
+`tests/docs-test.rkt` renders it and fails on a broken reference to its own sections or `vcl/…`
+bindings. Writing them found and fixed: `raco vcl <file>` rejected EVERY file with a `#lang vcl`
+line (blanking the line kept a newline, which VCL's lexer forbids; the line is now removed and a
+diagnostic moved back to the file's line), and a `#lang vcl` module's parse error was positioned in
+the bare expression (`<input>:1:28`), not the file (the reader now gives the string its srcloc and
+the macro raises at the exact character). Found, not fixed (fhir-tx): `$expand`'s `url` input does
+not compile an unregistered VCL url, though `raco fhir-tx expand` and `%terminologies` do.
+

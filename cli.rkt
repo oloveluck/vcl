@@ -13,7 +13,7 @@
          (only-in vcl/compile vcl->valueset)
          (only-in vcl/decompile compose->vcl)
          (only-in fhir/result/result ok? ok-value err-error validation-error-message)
-         (only-in fhir/diagnostic diagnostic diagnostic-loc loc attached-diagnostic emit-diagnostics format-flag))
+         (only-in fhir/diagnostic diagnostic diagnostic-loc loc loc-line loc-position attached-diagnostic emit-diagnostics format-flag))
 
 (provide compile-expression decompile-file)
 
@@ -27,16 +27,25 @@
   (define l (diagnostic-loc d))
   (struct-copy diagnostic d [loc (if l (struct-copy loc l [source source]) (loc source #f #f #f #f))]))
 
-;; compile-expression : string [source] -> void   print the ValueSet JSON for a VCL expression, or exit 1
-(define (compile-expression expr [source "<expression>"])
+;; compile-expression : string [source] [#:lines n #:chars k #:text t] -> void   print the ValueSet
+;; JSON for a VCL expression, or exit 1. The expression may have stood after n lines (k characters) of
+;; its file, `t` (a `#lang vcl` line): a diagnostic is moved back to its place there.
+(define (compile-expression expr [source "<expression>"] #:lines [lines 0] #:chars [chars 0] #:text [text expr])
   (define r (vcl->valueset expr))
   (unless (ok? r)
     (define e (err-error r))
-    (report (with-source (or (attached-diagnostic e)
-                             (diagnostic 'vcl 'compile 'error (validation-error-message e) #f))
-                         source)
-            expr))
+    (report (shift (with-source (or (attached-diagnostic e)
+                                    (diagnostic 'vcl 'compile 'error (validation-error-message e) #f))
+                                source)
+                   lines chars)
+            text))
   (displayln (jsexpr->string (ok-value r))))
+(define (shift d lines chars)
+  (define l (diagnostic-loc d))
+  (if (and l (loc-line l) (> lines 0))
+      (struct-copy diagnostic d [loc (struct-copy loc l [line (+ (loc-line l) lines)]
+                                                  [position (and (loc-position l) (+ (loc-position l) chars))])])
+      d))
 
 ;; decompile-file : path-string -> void   print the VCL for a ValueSet (or a bare compose) JSON file
 (define (decompile-file file)
@@ -66,8 +75,12 @@
     [(equal? (car args) "--decompile") (if (= (length args) 2) (decompile-file (cadr args)) (usage))]
     [(regexp-match? #rx"^-" (car args)) (usage)]
     [(file-exists? (car args))
-     ;; a .vcl file: one expression, optional #lang line, trailing newline allowed
-     ;; (the #lang line is blanked, not removed, so positions stay true)
-     (compile-expression (string-trim (regexp-replace #px"^#lang[^\n]*" (file->string (car args)) "") #px"\\s+$" #:left? #f)
-                         (car args))]
+     ;; a .vcl file: one expression, an optional #lang line before it, a trailing newline allowed.
+     ;; VCL forbids newlines, so the #lang line is REMOVED (blanking it left a newline the lexer
+     ;; rejects), and a diagnostic is moved back by the lines removed
+     (define text (file->string (car args)))
+     (define head (let ([m (regexp-match #px"^#lang[^\n]*\n?" text)]) (if m (car m) "")))
+     (define lines (for/sum ([c (in-string head)]) (if (char=? c #\newline) 1 0)))
+     (compile-expression (string-trim (substring text (string-length head)) #px"\\s+$" #:left? #f)
+                         (car args) #:lines lines #:chars (string-length head) #:text text)]
     [else (compile-expression (car args))]))

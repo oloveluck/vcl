@@ -14,7 +14,9 @@
 (require (for-syntax racket/base syntax/parse
                      (only-in vcl/parser/parse parse-vcl)
                      (only-in fhir/result/result ok? err-error)
-                     (only-in fhir/result/result validation-error-message))
+                     (only-in fhir/result/result validation-error-message)
+                     (only-in fhir/diagnostic attached-diagnostic diagnostic-message diagnostic-loc
+                              loc-line loc-column loc-position loc-span))
          json
          (only-in "parser/parse.rkt" parse-vcl)
          (only-in "compile.rkt" vcl->compose vcl->valueset)
@@ -25,13 +27,26 @@
          (rename-out [vcl-module-begin #%module-begin])
          vcl-source)
 
-;; compile-time validation: the expression must parse (its Result is re-derived at runtime)
+;; compile-time validation: the expression must parse (its Result is re-derived at runtime). The
+;; error is a syntax error at the character the parser stopped at: the expression's place in the
+;; file (the reader's srcloc on the string) plus the diagnostic's place in the expression.
 (define-syntax (vcl-source stx)
   (syntax-case stx ()
     [(_ src)
      (let ([r (parse-vcl (syntax-e #'src))])
        (unless (ok? r)
-         (raise-syntax-error 'vcl (validation-error-message (err-error r)) stx))
+         (define d (attached-diagnostic (err-error r)))
+         (define l (and d (diagnostic-loc d)))
+         (if (and l (syntax-line #'src) (loc-line l) (loc-column l))
+             (raise-syntax-error
+              'vcl (diagnostic-message d)
+              (datum->syntax #f (syntax-e #'src)
+                             (list (syntax-source #'src)
+                                   (+ (syntax-line #'src) (sub1 (loc-line l)))   ; (one line: the spec forbids newlines)
+                                   (+ (syntax-column #'src) (sub1 (loc-column l)))
+                                   (and (syntax-position #'src) (loc-position l) (+ (syntax-position #'src) (sub1 (loc-position l))))
+                                   (or (loc-span l) 1))))
+             (raise-syntax-error 'vcl (validation-error-message (err-error r)) stx)))
        #'src)]))
 
 ;; the module body the reader produces: exactly one (vcl-source "…") form

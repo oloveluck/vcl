@@ -13,7 +13,7 @@ Part of the [fhir](https://github.com/oloveluck/fhir) family of FHIR languages a
 
 ```sh
 vcl '(http://loinc.org)(8480-6;8462-4)'      # the ValueSet, as JSON
-vcl diabetes.vcl                              # an expression in a file
+vcl diabetes.vcl                              # an expression in a file (a #lang vcl line is allowed)
 vcl --decompile valueset.json                 # a ValueSet's compose, as VCL
 ```
 
@@ -41,5 +41,7 @@ raco pkg install --link --auto ../fhir/fhir ../fhir/fhir-spec .   # repos side b
 raco test .
 ```
 
-Reference: [oloveluck.github.io/vcl](https://oloveluck.github.io/vcl/). Architecture: `CLAUDE.md`.
+Reference: [oloveluck.github.io/vcl](https://oloveluck.github.io/vcl/). The language for agents,
+with a checked cheat sheet, the operator table and the common problems: [guide.md](guide.md); the
+workflow without MCP: [.claude/skills/vcl](.claude/skills/vcl/SKILL.md). Architecture: `CLAUDE.md`.
 License: MIT.

@@ -1,5 +1,5 @@
 #lang scribble/manual
-@(require (for-label racket/base racket/contract vcl/parser/parse vcl/compile vcl/decompile))
+@(require (for-label racket/base racket/contract vcl/parser/parse vcl/compile vcl/decompile vcl/workspace))
 
 @title{vcl: the ValueSet Compose Language}
 
@@ -25,12 +25,11 @@ raco pkg install --link --auto fhir/fhir vcl
 
 @verbatim{
 $ raco vcl '(http://loinc.org)(85354-9;55284-4)'
-{"resourceType": "ValueSet",
- "url": "http://fhir.org/VCL?v1=(http://loinc.org)(85354-9;55284-4)",
- "status": "active",
- "compose": {"include": [{"system": "http://loinc.org",
-                         "concept": [{"code": "85354-9"}, {"code": "55284-4"}]}]}}
+{"compose":{"include":[{"concept":[{"code":"85354-9"},{"code":"55284-4"}],"system":"http://loinc.org"}]},
+ "name":"VCLExpression","resourceType":"ValueSet","status":"active",
+ "url":"http://fhir.org/VCL?v1=(http://loinc.org)(85354-9;55284-4)"}
 }
+(one line of JSON, folded here).
 
 @bold{3. Expand it.} The terminology service (fhir-tx) recognises the implicit url anywhere a
 ValueSet url is expected (a binding, @tt{$expand}, FHIRPath's @tt{%terminologies.expand()}) and
@@ -69,7 +68,7 @@ newlines are not.
 
 @tabular[#:style 'boxed #:sep @hspace[2]
 (list (list @tt{raco vcl '<expression>'} "the ValueSet JSON (implicit url)")
-      (list @tt{raco vcl expression.vcl} "the same, from a file")
+      (list @tt{raco vcl expression.vcl} "the same, from a file (a #lang vcl line before the expression is allowed; an error is placed on the file's line)")
       (list @tt{raco vcl --decompile valueset.json} "the VCL of a ValueSet's compose"))]
 
 @litchar{--format text|json|outcome} chooses how an error is reported. Exit codes: 0, 1 on a VCL
@@ -80,8 +79,9 @@ error, 2 on usage.
 A @tt{.vcl} file holds one expression. @racket[(require "bp-panels.vcl")] gives @racket[source]
 (the text), @racket[expression] (the AST), @racket[compose] (the @tt{ValueSet.compose} jsexpr) and
 @racket[valueset] (a whole ValueSet under the implicit url). A parse error is a compile error of the
-requiring program, and requiring the module registers the value set, so bindings and @tt{$expand}
-find it by url. @tt{racket bp-panels.vcl} prints the ValueSet.
+requiring program, at the line and column in the @tt{.vcl} file where the expression stops; requiring
+the module registers the value set, so bindings and @tt{$expand} find it by url.
+@tt{racket bp-panels.vcl} prints the ValueSet.
 
 @racketblock[
 (require (only-in "bp-panels.vcl" [valueset bp-panels])
@@ -102,7 +102,11 @@ find it by url. @tt{racket bp-panels.vcl} prints the ValueSet.
 
 @tt{vcl/support} is what the family's language server (fhir-lsp) loads for VCL: a document's
 diagnostics (the one expression compiled to a compose). @tt{vcl/workspace} is what fhir-mcp runs for
-an agent: a file's ValueSet, expanded, and which part of the expression holds a code.
+an agent: a file's ValueSet, expanded, and which part of the expression holds a code. It also
+provides the repository's @tt{guide.md} (a cheat sheet, the operator table, what a compose cannot
+say, the common problems, each checked by its tests) as @racket[guide], which fhir-mcp serves as
+@tt{learn://vcl}. Without MCP, the repository's Claude skill (@tt{.claude/skills/vcl}) gives an agent
+the same workflow with the command line and the Racket API.
 
 @section{Limits}
 
@@ -110,8 +114,11 @@ an agent: a file's ValueSet, expanded, and which part of the expression holds a 
 @item{What a compose cannot say is an error: an exclusion below the top level, a conjunction with a
 plain code, value set or @tt{*} in it, conflicting systems in one conjunction, a bare @tt{*}.}
 @item{A nested filter list or an @tt{of} source goes into @tt{filter.value} as VCL text.}
-@item{When the terminology service expands a VCL value set, the operators @tt{>>} (generalizes),
-@tt{!!<} (descendent-leaf) and @tt{of} match nothing.}
+@item{When the terminology service expands a VCL value set, @tt{of} matches nothing (every other
+operator expands, @tt{>>} and @tt{!!<} included).}
+@item{The @tt{$expand} operation finds a VCL url that a module or a workspace has registered; an
+unregistered VCL url is expanded by @tt{raco fhir-tx expand} and FHIRPath's @tt{%terminologies}, which
+compile it on the fly, but not by @tt{$expand}'s @tt{url} input.}
 @item{Decompiling is lossy: an include with both concepts and filters keeps the concepts; displays,
 designations and the compose's @tt{inactive} and @tt{lockedDate} are dropped. The implicit url
 escapes spaces only.}
@@ -155,3 +162,10 @@ An active ValueSet. @racket[url] defaults to the implicit VCL url of @racket[src
 @defproc[(compose->vcl [compose jsexpr?]) string?]{
 A @tt{ValueSet.compose} as VCL. For compose-expressible expressions, compiling the result gives the
 compose back.}
+
+@subsection[#:style 'unnumbered]{@tt{vcl/workspace}}
+@defmodule[vcl/workspace]
+
+@defthing[workspace-support any/c]{The @tt{fhir/lang/workspace} support fhir-mcp loads for VCL.}
+@defthing[guide string?]{The repository's @tt{guide.md}: the language for agents (fhir-mcp's
+@tt{learn://vcl}).}

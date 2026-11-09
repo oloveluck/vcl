@@ -10,7 +10,7 @@
 ;;; could not be expanded.
 ;;; A Row is {system, code, display}.
 
-(require racket/contract racket/list racket/string json
+(require racket/contract racket/list racket/string racket/file racket/runtime-path json
          fhir/lang/workspace
          (only-in fhir/diagnostic diagnostic loc attached-diagnostic exn:fail:diagnostic exn:fail:diagnostic? exn:fail:diagnostic-diagnostic)
          (only-in fhir/operation apply-operation exn:fail:operation? exn:fail:operation-outcome)
@@ -18,7 +18,12 @@
          (only-in "compile.rkt" vcl->compose vcl->valueset)
          (only-in "decompile.rkt" compose->vcl))
 
-(provide (contract-out [workspace-support ws-support?]))
+(provide (contract-out [workspace-support ws-support?]
+                       ;; guide : the language guide (guide.md) a hub serves to agents (learn://vcl)
+                       [guide string?]))
+
+(define-runtime-path guide-file "guide.md")
+(define guide (file->string guide-file))
 
 (define (path-string p) (if (path? p) (path->string p) p))
 (define (expression text) (string-trim (regexp-replace #px"^#lang[^\n]*" text "")))
