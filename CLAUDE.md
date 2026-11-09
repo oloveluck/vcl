@@ -22,7 +22,7 @@ enumerations, bare `*`) errs clearly. `vcl-print` re-brackets compound members (
 reparse via the real grammar). Conformance: all **60 spec examples** (vendored,
 `vcl/tests/vendor/`) parse AND survive the print∘parse fixpoint; compose round-trip law tested.
 `#lang vcl` (one expression per file; parse errors are COMPILE errors) provides
-source/expression/compose/valueset; `raco fhir vcl <expr>` prints the ValueSet. **Implicit VCL
+source/expression/compose/valueset; `raco vcl <expr>` prints the ValueSet. **Implicit VCL
 ValueSets work in `$expand`**: `terminology/service.rkt` recognizes `http://fhir.org/VCL?v1=…`,
 percent-decodes (spec SHALL), compiles, and expands against its index — so `%terminologies` and
 the validator see VCL urls as real ValueSets.
