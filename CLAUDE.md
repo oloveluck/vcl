@@ -76,3 +76,9 @@ with a test that fails without the fix (`tests/cli-test.rkt`, compile.rkt's and 
   `vcl-source` checks `vcl->compose`, not only the parse): a refusal is a syntax error at the term
   (`a;b`, `*` were a run-time error with a stack trace). workspace.rkt gives a problem that names no
   file its file (`in-file`: a parse error had none, so the hub could not list it under the file).
+
+**A workspace problem at its own line** (2026-11-13): `workspace.rkt` cut the `#lang vcl` line off
+before compiling and reported a problem at the expression's line 1 — one line early in the file.
+`in-text` moves it by what stood before the expression (`prefix`: the `#lang` line, blank lines,
+indentation), as the command line already did.
+

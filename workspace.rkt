@@ -13,7 +13,7 @@
 (require racket/contract racket/list racket/string racket/file racket/runtime-path json
          fhir/lang/workspace
          (only-in fhir/diagnostic diagnostic loc attached-diagnostic exn:fail:diagnostic exn:fail:diagnostic? exn:fail:diagnostic-diagnostic
-                  diagnostic-loc diagnostic-message loc-source loc-line loc-column)
+                  diagnostic-loc diagnostic-message loc-source loc-line loc-column loc-position)
          (only-in fhir/operation apply-operation exn:fail:operation? exn:fail:operation-outcome)
          (only-in fhir/result/result ok? ok-value err-error validation-error-message)
          (only-in "compile.rkt" vcl->compose vcl->valueset)
@@ -27,7 +27,23 @@
 (define guide (file->string guide-file))
 
 (define (path-string p) (if (path? p) (path->string p) p))
-(define (expression text) (string-trim (regexp-replace #px"^#lang[^\n]*" text "")))
+(define (expression text) (string-trim (substring text (string-length (prefix text)))))
+;; prefix : string -> string   what stands before the expression in its file: a `#lang` line and
+;; the space after it
+(define (prefix text) (car (regexp-match #px"^(?:#lang[^\n]*)?\\s*" text)))
+;; in-text : diagnostic string -> diagnostic   a problem positioned in the expression, moved to its
+;; place in the file's text (the expression is one line: the lines and the columns before it count)
+(define (in-text d text)
+  (define before (prefix text))
+  (define l (diagnostic-loc d))
+  (define lines (for/sum ([c (in-string before)]) (if (char=? c #\newline) 1 0)))
+  (define indent (string-length (car (regexp-match #px"[^\n]*$" before))))
+  (cond [(or (not l) (not (loc-line l)) (string=? before "")) d]
+        [else (struct-copy diagnostic d
+                           [loc (struct-copy loc l
+                                             [line (+ (loc-line l) lines)]
+                                             [column (and (loc-column l) (+ (loc-column l) indent))]
+                                             [position (and (loc-position l) (+ (loc-position l) (string-length before)))])])]))
 
 ;; valueset : workspace path|#f text -> ValueSet   raises the positioned diagnostic
 (define (valueset ws path text)
@@ -37,7 +53,9 @@
                            #:name (and stem (name-of stem))))
   (cond [(ok? r) (if stem (hash-set* (ok-value r) 'id (id-of stem) 'title stem) (ok-value r))]
         [else (define e (err-error r))
-              (define d (in-file (or (attached-diagnostic e) (diagnostic 'vcl 'compile 'error (validation-error-message e) #f))
+              (define d (in-file (in-text (or (attached-diagnostic e)
+                                              (diagnostic 'vcl 'compile 'error (validation-error-message e) #f))
+                                          text)
                                  (and path (path-string path))))
               (raise (exn:fail:diagnostic (validation-error-message e) (current-continuation-marks) d))]))
 ;; in-file : diagnostic string|#f -> diagnostic   a problem that names no file names this one (a
@@ -128,6 +146,13 @@
                         (loc-line l) (loc-column l) (diagnostic-message d)))
                 '(("bad.vcl" 1 2 "the expression ends after `http://loinc.org`")
                   ("nosystem.vcl" 1 27 "a code requires a (system) prefix to be compose-expressible: 17856-6")))
+  ;; ... at its place in the FILE: after a `#lang vcl` line (and a blank one, and indentation) the
+  ;; problem is on the expression's own line and column, not one line early
+  (define-values (_rs3 ds3) (artifacts ws (list (cons (build-path dir "lang.vcl") "#lang vcl\n(http://loinc.org)4548-4; 17856-6\n")
+                                                (cons (build-path dir "lang2.vcl") "#lang vcl\n\n  (http://loinc.org)4548-4; 17856-6\n"))))
+  (check-equal? (for/list ([d (in-list ds3)]) (list (loc-line (diagnostic-loc d)) (loc-column (diagnostic-loc d))))
+                '((2 27) (3 29)))
+  (check-equal? (hash-ref (valueset ws (build-path dir "ok.vcl") "#lang vcl\n(http://loinc.org)4548-4\n") 'id) "ok")
   (define r (run ws (build-path dir "hba1c-tests.vcl") "(http://loinc.org)(4548-4; 17856-6)" (hasheq)))
   (check-equal? (map (lambda (row) (hash-ref row 'code)) (run-result-rows r)) '("4548-4" "17856-6"))
   (check-equal? (hash-ref (run-result-summary r) 'total) 2)
