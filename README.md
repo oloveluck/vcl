@@ -1,5 +1,9 @@
 # vcl — ValueSet Compose Language
 
+> Part of [fhir](https://github.com/oloveluck/fhir), a FHIR implementation designed to be used by
+> AI agents: one line per problem, at its place, with what would fix it; a guide written for an
+> agent to read; the same language inside the `fhir-mcp` workspace.
+
 A *value set* is a named set of codes: "the lab tests used to follow diabetes", "the codes that
 mean a parent". FHIR writes one as a ValueSet resource, a page of JSON.
 [VCL](https://build.fhir.org/ig/FHIR/ig-guidance/vcl.html) writes it on one line: which codes, from
@@ -28,9 +32,9 @@ them. With Racket, `raco vcl` is the same command.
 example explained step by step, how to write an expression, listing the codes a value set holds,
 and the reference.
 
-- How well it works (all 60 examples of the VCL specification): [TESTING.md](TESTING.md).
-- For AI agents: [guide.md](guide.md), a cheat sheet and the common problems, each example tested;
+- For agents: [guide.md](guide.md), a cheat sheet and the common problems, each example tested;
   and the [vcl skill](.claude/skills/vcl/SKILL.md).
+- How well it works (all 60 examples of the VCL specification): [TESTING.md](TESTING.md).
 - How it is built: [CLAUDE.md](CLAUDE.md).
 
-Part of the [fhir](https://github.com/oloveluck/fhir) family. License: MIT.
+License: MIT.
