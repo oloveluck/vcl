@@ -1,47 +1,36 @@
 # vcl — ValueSet Compose Language
 
-[VCL](https://build.fhir.org/ig/FHIR/ig-guidance/vcl.html), the compact, URL-embeddable syntax for a
-ValueSet's compose: a parser, a compiler to `ValueSet.compose`, and a decompiler back to VCL. All 60
-examples on the spec page parse; [TESTING.md](TESTING.md) has the details.
-
-Part of the [fhir](https://github.com/oloveluck/fhir) family of FHIR languages and tools.
-
-## Command line
-
-[Build the family's tools](https://github.com/oloveluck/fhir#getting-the-tools) once and put
-`dist/bin` on your `PATH`; they run without Racket. With Racket installed, `raco vcl` is the same.
-
-```sh
-vcl '(http://loinc.org)(8480-6;8462-4)'      # the ValueSet, as JSON
-vcl diabetes.vcl                              # an expression in a file (a #lang vcl line is allowed)
-vcl --decompile valueset.json                 # a ValueSet's compose, as VCL
-```
+A *value set* is a named set of codes: "the lab tests used to follow diabetes", "the codes that
+mean a parent". FHIR writes one as a ValueSet resource, a page of JSON.
+[VCL](https://build.fhir.org/ig/FHIR/ig-guidance/vcl.html) writes it on one line: which codes, from
+which code system, listed one by one or described by a rule. This package turns a VCL expression
+into the ValueSet resource and a ValueSet back into VCL; a mistake is reported where the expression
+stops.
 
 ```
-$ vcl '(http://loinc.org)(8480-6;8462-4)'
-{"compose":{"include":[{"concept":[{"code":"8480-6"},{"code":"8462-4"}],"system":"http://loinc.org"}]},"name":"VCLExpression","resourceType":"ValueSet","status":"active","url":"http://fhir.org/VCL?v1=(http://loinc.org)(8480-6;8462-4)"}
+$ vcl '(http://loinc.org)(4548-4;2345-7)'
+{"compose":{"include":[{"concept":[{"code":"4548-4"},{"code":"2345-7"}],"system":"http://loinc.org"}]},"name":"VCLExpression","resourceType":"ValueSet","status":"active","url":"http://fhir.org/VCL?v1=(http://loinc.org)(4548-4;2345-7)"}
+$ vcl --decompile ValueSet-marital-status.json
+(http://terminology.hl7.org/CodeSystem/v3-MaritalStatus)*;(http://terminology.hl7.org/CodeSystem/v3-NullFlavor)UNK
 ```
 
-An expression that doesn't parse is reported where it stops, with exit status 1.
+The first line names two LOINC codes and prints the ValueSet for them. The second reads a value set
+FHIR publishes and prints it as VCL: every marital status, and "unknown".
 
-## In Racket
+## Install
 
-A `.vcl` file that starts with `#lang vcl` is a module holding one expression, checked when compiled:
+Build the [fhir family's tools](https://github.com/oloveluck/fhir#install) once; `vcl` is one of
+them. With Racket, `raco vcl` is the same command.
 
-```racket
-#lang racket/base
-(require "bp.vcl")
-valueset            ; the ValueSet, registered by its url for the validator and terminology service
-```
+## Documentation
 
-## Develop
+**[oloveluck.github.io/vcl](https://oloveluck.github.io/vcl/)**: what a value set is, a first
+example explained step by step, how to write an expression, listing the codes a value set holds,
+and the reference.
 
-```sh
-raco pkg install --link --auto ../fhir/fhir ../fhir/fhir-spec .   # repos side by side
-raco test .
-```
+- How well it works (all 60 examples of the VCL specification): [TESTING.md](TESTING.md).
+- For AI agents: [guide.md](guide.md), a cheat sheet and the common problems, each example tested;
+  and the [vcl skill](.claude/skills/vcl/SKILL.md).
+- How it is built: [CLAUDE.md](CLAUDE.md).
 
-Reference: [oloveluck.github.io/vcl](https://oloveluck.github.io/vcl/). The language for agents,
-with a checked cheat sheet, the operator table and the common problems: [guide.md](guide.md); the
-workflow without MCP: [.claude/skills/vcl](.claude/skills/vcl/SKILL.md). Architecture: `CLAUDE.md`.
-License: MIT.
+Part of the [fhir](https://github.com/oloveluck/fhir) family. License: MIT.
