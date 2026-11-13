@@ -69,6 +69,13 @@
   (check-regexp-match #rx"conjunction of non-filter terms"
                       (refusal "(http://loinc.org)(4548-4; 17856-6), (http://loinc.org)17856-6"))
   (check-regexp-match #rx"requires a \\(system\\) prefix" (refusal "*"))
+  (check-equal? (refusal "4548-4; 17856-6")
+                "VCL: invalid encoding \"vcl: a code requires a (system) prefix to be compose-expressible: 4548-4\" (see https://build.fhir.org/ig/FHIR/ig-guidance/vcl.html)")
+  (check-true (string-contains? text "a code requires a (system) prefix to be compose-expressible: 4548-4"))
+  (check-regexp-match #rx"a filter requires a \\(system\\) prefix" (refusal "concept<<73211009"))
+  (check-regexp-match #rx"a code requires a \\(system\\) prefix to be compose-expressible: 17856-6"
+                      (refusal "(http://loinc.org)4548-4; 17856-6"))      ; the common problem
+  (check-true (hash? (compose-of "^http://hl7.org/fhir/ValueSet/administrative-gender")))   ; a value set needs none
   ;; and the common problems: no precedence between ; and , ; a system outside brackets
   (check-false (ok? (parse-vcl "(http://loinc.org)4548-4;(http://snomed.info/sct)73211009, (http://loinc.org)x")))
   (check-false (ok? (parse-vcl "http://loinc.org|4548-4"))))

@@ -302,19 +302,21 @@ broken.vcl:2:50: vcl parse error: the expression ends after `female`
    |                                                  ^^^^^^
 }|
 
-The argument is read as a file when a file of that name exists, and as an expression otherwise. So
-a mistyped file name is taken for an expression: check the spelling if the answer looks strange.
+The argument is read as a file when a file of that name exists, and as an expression otherwise.
+An argument that can only be a file name (it ends in @tt{.vcl} or has a @tt{/}, and has no
+brackets, quotes or operators) is never taken for an expression: when no such file is there, the
+command says @tt{vcl: cannot read} and the path, and exits with 2.
 
 An error is reported as text by default. @litchar{--format json} writes it as JSON and
 @litchar{--format outcome} as a FHIR OperationOutcome, for a program to read. The command exits
-with 0 when all is well, 1 on a VCL error, and 2 when it was called wrongly or cannot read the file
-to decompile.
+with 0 when all is well, 1 on a VCL error, and 2 when it was called wrongly or cannot read a file.
 
 @subsection[#:tag "module"]{As a module}
 
 A file whose first line is @tt{#lang vcl} is a Racket module, so a program can require it. The
 expression is checked when the program is built: a mistake stops the build, at the line and column
-in the @tt{.vcl} file where the expression stops.
+in the @tt{.vcl} file where the expression stops, or where the part stands that a ValueSet cannot
+hold (@secref["limits"]).
 
 @verbatim|{
 #lang vcl
@@ -376,8 +378,19 @@ or @vcl{*}, or around an "or" in brackets (only rules can be combined with "and"
 code systems inside one "and"; a @vcl{*} with no code system. For example
 @vcl{(http://loinc.org)(4548-4; 17856-6), (http://loinc.org)17856-6} gives
 @tt{conjunction of non-filter terms is not compose-expressible}.}
-@item{@bold{Give the code system.} A code written with no code system compiles to a group that
-names none, which is not a valid ValueSet.}
+@item{@bold{Give the code system.} VCL lets you write a code or a rule with no code system
+(@vcl{male;female}, @vcl{concept<<PRN}), but a ValueSet must name the system of the codes and rules
+it lists, so such an expression is refused, at the first code or rule that has none:
+@verbatim|{
+$ raco vcl 'male;female'
+<expression>:1:1: vcl compile error: a code requires a (system) prefix to be compose-expressible: male
+ 1 | male;female
+   | ^^^^
+}|
+A code system in round brackets covers the one thing that follows it. In
+@vcl{(http://loinc.org)4548-4; 17856-6} the second code has none: bracket the codes,
+@vcl{(http://loinc.org)(4548-4; 17856-6)}. Only the members of another value set (@vcl{^url}) need
+no code system.}
 @item{@bold{Expanding needs the code system}, and LOINC and SNOMED CT are not shipped. A rule over
 a code system that is not at hand expands to no codes, without a warning (@secref["expanding"]).}
 @item{@bold{Lists of rules.} A list of filters inside @vcl{^{…}} and the source of an @italic{of}
@@ -461,7 +474,9 @@ The AST is prefab (@tt{vcl/parser/ast}): @racket[vcl-sub] (a system applied to a
 Text or an AST to @racket[(ok compose)]. A disjunction becomes include entries, a conjunction one
 include's filters, a top-level @tt{-} the exclude, a system distributes over its members, @tt{^uri}
 is a @tt{valueSet} reference. What a compose cannot say is an @racket[err], never an exception: an
-exclusion below the top level, a conjunction of plain codes, a bare @tt{*}.}
+exclusion below the top level, a conjunction of plain codes, a bare @tt{*}, a code or a filter
+with no code system. Such an error carries a @tt{compile} diagnostic (@tt{fhir/diagnostic}'s
+@tt{attached-diagnostic}), positioned at the term when @racket[x] is text.}
 @defproc[(vcl->valueset [src string?] [#:url url (or/c string? #f) #f] [#:name name (or/c string? #f) #f]) result?]{
 An active ValueSet. @racket[url] defaults to the implicit VCL url of @racket[src]; @racket[name] to
 @racket["VCLExpression"].}

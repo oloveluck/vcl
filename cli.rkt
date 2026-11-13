@@ -3,7 +3,10 @@
 ;;; cli.rkt — `raco vcl`: the command line for the VCL (ValueSet Compose Language) package.
 ;;;
 ;;;   raco vcl '<expression>'            compile a VCL expression to its ValueSet (implicit-url form)
-;;;   raco vcl <file.vcl>                same, reading the (one-line) expression from a file
+;;;   raco vcl <file.vcl>                same, reading the (one-line) expression from a file. The
+;;;                                      argument is a file when one of that name exists, or when it
+;;;                                      can only be meant as one (`file-like?`): then a file that is
+;;;                                      not there is "cannot read", exit 2, not an expression
 ;;;   raco vcl --decompile <valueset.json>   print the VCL expression for a ValueSet's compose
 ;;; Exit codes: 0 ok · 1 VCL error · 2 usage.
 
@@ -15,7 +18,15 @@
          (only-in fhir/result/result ok? ok-value err-error validation-error-message)
          (only-in fhir/diagnostic diagnostic diagnostic-loc loc loc-line loc-position attached-diagnostic emit-diagnostics format-flag))
 
-(provide compile-expression decompile-file)
+(provide compile-expression decompile-file file-like?)
+
+;; file-like? : string -> boolean   an argument that can only be meant as a file: it ends in `.vcl`
+;; or has a `/`, and has none of the characters an expression with either needs (a system's or a
+;; group's brackets, `^` before a value set's url, the quotes of a regex after `/`). `nothere.vcl`
+;; used to be compiled as the expression "code nothere, its property vcl", exit 0.
+(define (file-like? arg)
+  (and (or (regexp-match? #rx"(?i:[.]vcl)$" arg) (regexp-match? #rx"/" arg))
+       (not (regexp-match? #rx"[][(){};,=<>^?*\"~!|]" arg))))
 
 ;; compile-expression : string -> void   print the ValueSet JSON for a VCL expression, or exit 1
 ;; report : diagnostic text -> exit 1   (format from --format)
@@ -74,8 +85,9 @@
     [(null? args) (usage)]
     [(equal? (car args) "--decompile") (if (= (length args) 2) (decompile-file (cadr args)) (usage))]
     [(regexp-match? #rx"^-" (car args)) (usage)]
-    [(file-exists? (car args))
-     ;; a .vcl file: one expression, an optional #lang line before it, a trailing newline allowed.
+    [(or (file-exists? (car args)) (file-like? (car args)))
+     ;; a .vcl file: one expression, an optional #lang line before it, a trailing newline allowed
+     ;; (a file-like argument with no file fails to open: the handler above, exit 2).
      ;; VCL forbids newlines, so the #lang line is REMOVED (blanking it left a newline the lexer
      ;; rejects), and a diagnostic is moved back by the lines removed
      (define text (file->string (car args)))
@@ -84,3 +96,19 @@
      (compile-expression (string-trim (substring text (string-length head)) #px"\\s+$" #:left? #f)
                          (car args) #:lines lines #:chars (string-length head) #:text text)]
     [else (compile-expression (car args))]))
+
+(module+ test
+  (require rackunit)
+  ;; a file name, whether or not the file is there
+  (check-true (file-like? "nothere.vcl"))
+  (check-true (file-like? "sets/hba1c.VCL"))
+  (check-true (file-like? "./hba1c"))
+  (check-true (file-like? "/tmp/sets/hba1c.txt"))
+  ;; expressions, the ones with a `.vcl` or a `/` in them included
+  (check-false (file-like? "(http://loinc.org)(4548-4; 17856-6)"))
+  (check-false (file-like? "^http://hl7.org/fhir/ValueSet/administrative-gender"))
+  (check-false (file-like? "(http://loinc.org)COMPONENT/\".*Dichloroethane.*\""))
+  (check-false (file-like? "(http://example.org/cs)panadol.vcl"))        ; the property `vcl` of a code
+  (check-false (file-like? "B.codeprop"))
+  (check-false (file-like? "a;b"))
+  (check-false (file-like? "B")))

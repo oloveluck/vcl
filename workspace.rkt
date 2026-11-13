@@ -12,7 +12,8 @@
 
 (require racket/contract racket/list racket/string racket/file racket/runtime-path json
          fhir/lang/workspace
-         (only-in fhir/diagnostic diagnostic loc attached-diagnostic exn:fail:diagnostic exn:fail:diagnostic? exn:fail:diagnostic-diagnostic)
+         (only-in fhir/diagnostic diagnostic loc attached-diagnostic exn:fail:diagnostic exn:fail:diagnostic? exn:fail:diagnostic-diagnostic
+                  diagnostic-loc diagnostic-message loc-source loc-line loc-column)
          (only-in fhir/operation apply-operation exn:fail:operation? exn:fail:operation-outcome)
          (only-in fhir/result/result ok? ok-value err-error validation-error-message)
          (only-in "compile.rkt" vcl->compose vcl->valueset)
@@ -36,8 +37,16 @@
                            #:name (and stem (name-of stem))))
   (cond [(ok? r) (if stem (hash-set* (ok-value r) 'id (id-of stem) 'title stem) (ok-value r))]
         [else (define e (err-error r))
-              (define d (or (attached-diagnostic e) (diagnostic 'vcl 'compile 'error (validation-error-message e) (loc (and path (path-string path)) #f #f #f #f))))
+              (define d (in-file (or (attached-diagnostic e) (diagnostic 'vcl 'compile 'error (validation-error-message e) #f))
+                                 (and path (path-string path))))
               (raise (exn:fail:diagnostic (validation-error-message e) (current-continuation-marks) d))]))
+;; in-file : diagnostic string|#f -> diagnostic   a problem that names no file names this one (a
+;; parse error, or a term a compose cannot hold, is positioned in the expression: the hub finds a
+;; file's problems by their source)
+(define (in-file d source)
+  (define l (diagnostic-loc d))
+  (cond [(or (not source) (and l (loc-source l))) d]
+        [else (struct-copy diagnostic d [loc (if l (struct-copy loc l [source source]) (loc source #f #f #f #f))])]))
 (define (id-of stem) (regexp-replace* #rx"[^A-Za-z0-9.-]" stem "-"))
 (define (name-of stem)
   (define parts (regexp-split #rx"[^A-Za-z0-9]+" stem))
@@ -110,6 +119,15 @@
   (check-equal? (hash-ref (car rs) 'url) "http://example.org/workspace/ValueSet/hba1c-tests")
   (check-equal? (hash-ref (car rs) 'name) "Hba1cTests")
   (check-equal? (length ds) 1)
+  ;; a problem names its file: a parse error, and a term a compose cannot hold (codes of no system)
+  (define-values (_rs ds2) (artifacts ws (list (cons (build-path dir "bad.vcl") "(http://loinc.org")
+                                               (cons (build-path dir "nosystem.vcl") "(http://loinc.org)4548-4; 17856-6"))))
+  (check-equal? (for/list ([d (in-list ds2)])
+                  (define l (diagnostic-loc d))
+                  (list (let-values ([(base name dir?) (split-path (loc-source l))]) (path->string name))
+                        (loc-line l) (loc-column l) (diagnostic-message d)))
+                '(("bad.vcl" 1 2 "the expression ends after `http://loinc.org`")
+                  ("nosystem.vcl" 1 27 "a code requires a (system) prefix to be compose-expressible: 17856-6")))
   (define r (run ws (build-path dir "hba1c-tests.vcl") "(http://loinc.org)(4548-4; 17856-6)" (hasheq)))
   (check-equal? (map (lambda (row) (hash-ref row 'code)) (run-result-rows r)) '("4548-4" "17856-6"))
   (check-equal? (hash-ref (run-result-summary r) 'total) 2)

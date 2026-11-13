@@ -3,8 +3,9 @@
 ;;; base.rkt — the module language for #lang vcl.
 ;;;
 ;;; The reader hands over the file's single VCL expression as (vcl-source "…"). The module
-;;; language parses it AT COMPILE TIME (a bad expression is a syntax error, like every other lang
-;;; here), then provides:
+;;; language parses it and compiles it to a compose AT COMPILE TIME (an expression that does not
+;;; parse, or that a compose cannot hold, is a syntax error, like every other lang here), then
+;;; provides:
 ;;;   source     : the original text
 ;;;   expression : the VCL AST (prefab)
 ;;;   compose    : the ValueSet.compose jsexpr
@@ -12,7 +13,7 @@
 ;;; `main` prints the ValueSet JSON.
 
 (require (for-syntax racket/base syntax/parse
-                     (only-in vcl/parser/parse parse-vcl)
+                     (only-in vcl/compile vcl->compose)
                      (only-in fhir/result/result ok? err-error)
                      (only-in fhir/result/result validation-error-message)
                      (only-in fhir/diagnostic attached-diagnostic diagnostic-message diagnostic-loc
@@ -28,13 +29,15 @@
          (rename-out [vcl-module-begin #%module-begin])
          vcl-source)
 
-;; compile-time validation: the expression must parse (its Result is re-derived at runtime). The
-;; error is a syntax error at the character the parser stopped at: the expression's place in the
-;; file (the reader's srcloc on the string) plus the diagnostic's place in the expression.
+;; compile-time validation: the expression must parse and compile to a compose (the Results are
+;; re-derived at runtime). The error is a syntax error at the character the parser stopped at, or
+;; at the term a compose cannot hold (`a;b`: codes of no system — it used to build, and the module
+;; held an invalid ValueSet): the expression's place in the file (the reader's srcloc on the
+;; string) plus the diagnostic's place in the expression.
 (define-syntax (vcl-source stx)
   (syntax-case stx ()
     [(_ src)
-     (let ([r (parse-vcl (syntax-e #'src))])
+     (let ([r (vcl->compose (syntax-e #'src))])
        (unless (ok? r)
          (define d (attached-diagnostic (err-error r)))
          (define l (and d (diagnostic-loc d)))

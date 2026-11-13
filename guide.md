@@ -69,7 +69,11 @@ VCL is wider than `ValueSet.compose`. These parse, but do not compile to a compo
   `compose.exclude` applies to the whole value set, so exclusion is only supported at the top level;
 - enumerations joined by `,` (and), `(http://loinc.org)(4548-4; 17856-6), (http://loinc.org)17856-6`:
   a compose can intersect filters, not lists of codes;
-- `*` without a system: a compose names the system it takes every code from.
+- `*` without a system: a compose names the system it takes every code from;
+- a code or a filter without a system, `4548-4; 17856-6` or `concept<<73211009`: the grammar makes
+  the `(system)` prefix optional, but an include that lists codes or filters must name their system
+  (`a code requires a (system) prefix to be compose-expressible: 4548-4`, positioned at the code).
+  Only `^valueset` needs none.
 
 ## Running it
 **Command line.** `vcl` (or `raco vcl`):
@@ -79,19 +83,21 @@ vcl hba1c.vcl                                    # the expression in a file
 vcl --decompile valueset.json                    # a ValueSet's (or a bare compose's) VCL
 ```
 An expression that does not parse or compile is reported where it stops (`--format json` or
-`outcome` for machine-readable diagnostics), with exit status 1.
+`outcome` for machine-readable diagnostics), with exit status 1. An argument that can only be a
+file name (it ends in `.vcl` or has a `/`, and has no brackets, quotes or operators) with no such
+file is `vcl: cannot read <path>`, exit status 2, not an expression.
 
 **Expanding.** The terminology service (fhir-tx) reads a VCL url as a ValueSet:
 `fhir-tx expand 'http://fhir.org/VCL?v1=(http://hl7.org/fhir/administrative-gender)(male;female)'`
 lists the codes, with displays, from the code systems in its packages. Codes a VCL expression
-enumerates are members without any code system; a filter needs the code system's content. The
+enumerates are members whether or not the code system's content is at hand; a filter needs it. The
 `$expand` and `$validate-code` operations take a VCL url as their `url` the same way, registered or
 not.
 
 **As a module.** A file that starts with `#lang vcl` holds one expression and is a Racket module
-providing `source`, `expression` (the AST), `compose` and `valueset`. The expression is checked when
-the module compiles (an error at its line and column), and requiring the module registers the
-ValueSet by its url, so the validator and the terminology service find it.
+providing `source`, `expression` (the AST), `compose` and `valueset`. The expression is parsed and
+compiled to its compose when the module compiles (an error at its line and column), and requiring
+the module registers the ValueSet by its url, so the validator and the terminology service find it.
 
 **In a workspace** (fhir-mcp). A `.vcl` file is the ValueSet `<canonical>/ValueSet/<file name>`:
 CQL libraries, FSH bindings and validation see it by that url. `run` expands it with the
@@ -105,6 +111,8 @@ the code. `query("vcl", "<expression>")` expands an expression without a file.
   with a newline, and a `#lang vcl` line before it).
 - `unexpected comma` in `a; b, c`: `;` and `,` have no precedence; bracket one side.
 - `… is not compose-expressible`: see "What a compose cannot say".
+- `a code requires a (system) prefix` in `(http://loinc.org)4548-4; 17856-6`: a system covers the
+  one term after it. Bracket the codes: `(http://loinc.org)(4548-4; 17856-6)`.
 - `the expression ends after http://loinc.org|4548-4`: a system goes in round brackets,
   `(http://loinc.org)4548-4`. A URI takes every character up to whitespace or a bracket, so
   without brackets the code is read as part of it.

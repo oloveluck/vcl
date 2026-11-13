@@ -18,13 +18,19 @@
 ;;;                           form carries the expression textually)
 ;;;
 ;;; Not compose-expressible (clear errs, never silent): exclusion below the top level,
-;;; conjunction of enumerations, a bare `of` at include level with no property context.
+;;; conjunction of enumerations, `*` with no system, and a code or a filter with no system — the
+;;; grammar makes the (system) prefix optional (the specification's examples write `A;B` and
+;;; `concept<<B`), but a compose include that lists concepts or filters SHALL name their system
+;;; (FHIR's vsd-1 and vsd-2), so the ValueSet would be invalid. Each refusal is a `compile`
+;;; diagnostic attached to the error (fhir/diagnostic `attached-diagnostic`), positioned at the
+;;; term when the expression was parsed from text.
 
 (require racket/contract racket/string racket/list racket/match
          json
          "parser/ast.rkt"
          (only-in "parser/parse.rkt" parse-vcl)
-         (only-in fhir/result/result ok err ok? ok-value result? result-bind invalid-encoding))
+         (only-in fhir/result/result ok err ok? ok-value result? result-bind invalid-encoding)
+         (only-in fhir/diagnostic diagnostic attach-diagnostic! attached-loc))
 
 (provide
  (contract-out
@@ -35,13 +41,32 @@
 (define spec-url "https://build.fhir.org/ig/FHIR/ig-guidance/vcl.html")
 (define (vcl-err msg) (err (invalid-encoding 'VCL spec-url msg)))
 
+;; A Refusal is (exn:vcl:refused message marks term): a term a compose cannot hold.
+(struct exn:vcl:refused exn:fail (term))
+;; refuse : VclExpr format-string any ... -> !
+(define (refuse term fmt . args)
+  (raise (exn:vcl:refused (apply format fmt args) (current-continuation-marks) term)))
+;; refusal->err : Refusal -> err   the error, with its diagnostic: the message, at the term
+(define (refusal->err e)
+  (define payload (invalid-encoding 'VCL spec-url (string-append "vcl: " (exn-message e))))
+  (err (attach-diagnostic! payload (diagnostic 'vcl 'compile 'error (exn-message e) (term-loc (exn:vcl:refused-term e))))))
+;; term-loc : VclExpr -> loc|#f   where the term stood: its own place, else its first part's
+(define (term-loc t)
+  (or (attached-loc t)
+      (match t
+        [(vcl-sub _ inner) (term-loc inner)]
+        [(or (vcl-conj (cons e _)) (vcl-disj (cons e _))) (term-loc e)]
+        [(vcl-excl base _) (term-loc base)]
+        [_ #f])))
+
 ;; ---- compile -----------------------------------------------------------------
 
 (define (vcl->compose x)
   (define ast-r (if (string? x) (parse-vcl x) (ok x)))
   (result-bind ast-r
     (lambda (ast)
-      (with-handlers ([exn:fail? (lambda (e) (vcl-err (exn-message e)))])
+      (with-handlers ([exn:vcl:refused? refusal->err]
+                      [exn:fail? (lambda (e) (vcl-err (exn-message e)))])
         (define-values (inc exc) (split-exclusion ast))
         (ok (drop-empty
              (hasheq 'include (append-map (lambda (b) (branch->includes b #f)) (branches inc))
@@ -71,7 +96,7 @@
      ;; a system prefix scopes its whole group; a disjunction inside collapses per kind
      (system-group (or system sys) inner)]
     [(vcl-conj es) (list (conj->include es sys))]
-    [(vcl-excl _ _) (error 'vcl "exclusion is only supported at the top level")]
+    [(vcl-excl _ _) (refuse b "exclusion is only supported at the top level")]
     [(vcl-disj es) (append-map (lambda (e) (branch->includes e sys)) es)]
     [_ (list (simple->include b sys))]))
 
@@ -83,8 +108,8 @@
   (define others (filter (lambda (b) (not (vcl-code? b))) bs))
   (append
    (if (pair? codes)
-       (list (with-system sys (hasheq 'concept (for/list ([c (in-list codes)])
-                                                 (hasheq 'code (vcl-code-c c))))))
+       (list (with-system sys (car codes) (hasheq 'concept (for/list ([c (in-list codes)])
+                                                             (hasheq 'code (vcl-code-c c))))))
        '())
    (append-map (lambda (b) (branch->includes b sys)) others)))
 
@@ -93,31 +118,38 @@
   (define fs (for/list ([e (in-list es)])
                (match (strip-sub e)
                  [(and f (or (vcl-filter _ _ _) (vcl-of _ _))) (filter->jsexpr f)]
-                 [other (error 'vcl "conjunction of non-filter terms is not compose-expressible: ~a"
-                               (vcl-print other))])))
-  (with-system (conj-system es sys) (hasheq 'filter fs)))
+                 [other (refuse other "conjunction of non-filter terms is not compose-expressible: ~a"
+                                (vcl-print other))])))
+  (with-system (conj-system es sys) (car es) (hasheq 'filter fs)))
 
 ;; a conjunction's system: an inherited one, or a single agreed (system) prefix on its terms
 (define (conj-system es sys)
   (define own (remove-duplicates (filter values (map (lambda (e) (match e [(vcl-sub s _) s] [_ #f])) es))))
   (cond [(null? own) sys]
         [(and (null? (cdr own)) (or (not sys) (equal? (car own) sys))) (car own)]
-        [else (error 'vcl "conflicting systems in one conjunction")]))
+        [else (refuse (car es) "conflicting systems in one conjunction")]))
 (define (strip-sub e) (match e [(vcl-sub _ inner) inner] [_ e]))
 
 ;; one simple term -> one include entry
 (define (simple->include b sys)
   (match b
-    [(vcl-code c) (with-system sys (hasheq 'concept (list (hasheq 'code c))))]
-    [(vcl-star) (if sys (with-system sys (hasheq))
-                    (error 'vcl "* requires a (system) prefix to be compose-expressible"))]
-    [(vcl-include vs) (with-system sys (hasheq 'valueSet (list vs)))]
+    [(vcl-code c) (with-system sys b (hasheq 'concept (list (hasheq 'code c))))]
+    [(vcl-star) (if sys (with-system sys b (hasheq))
+                    (refuse b "* requires a (system) prefix to be compose-expressible"))]
+    [(vcl-include vs) (with-system sys b (hasheq 'valueSet (list vs)))]
     [(and f (or (vcl-filter _ _ _) (vcl-of _ _)))
-     (with-system sys (hasheq 'filter (list (filter->jsexpr f))))]))
+     (with-system sys b (hasheq 'filter (list (filter->jsexpr f))))]))
 
-(define (with-system sys h)
+;; with-system : (cons uri version|#f)|#f VclExpr include -> include   the include with its system.
+;; An include of concepts or filters SHALL name one (FHIR's vsd-1, vsd-2): without, the term that
+;; made it is refused (`a;b`, `concept<<B`); an include of value sets needs none
+(define (with-system sys term h)
   (match sys
-    [#f h]
+    [#f (cond [(hash-has-key? h 'concept)
+               (refuse term "a code requires a (system) prefix to be compose-expressible: ~a" (vcl-print term))]
+              [(hash-has-key? h 'filter)
+               (refuse term "a filter requires a (system) prefix to be compose-expressible: ~a" (vcl-print term))]
+              [else h])]
     [(cons u #f) (hash-set h 'system u)]
     [(cons u v) (hash-set* h 'system u 'version v)]))
 
@@ -196,7 +228,10 @@
   (format "\"~a\"" (string-replace (string-replace s "\\" "\\\\") "\"" "\\\"")))
 
 (module+ test
-  (require rackunit)
+  (require rackunit
+           (only-in fhir/result/result err-error validation-error-message)
+           (only-in fhir/diagnostic attached-diagnostic diagnostic-phase diagnostic-message diagnostic-loc
+                    loc-line loc-column loc-span))
   (define (C s) (ok-value (vcl->compose s)))
   ;; a system group of codes -> one include with a concept list
   (check-equal? (C "(http://loinc.org)(a;b)")
@@ -235,6 +270,39 @@
   (check-false (ok? (vcl->compose "a,b")))
   (check-false (ok? (vcl->compose "(a;(b)-(c))")))
   (check-false (ok? (vcl->compose "*")))
+  ;; a code or a filter with no (system): the grammar allows it (the specification's own examples),
+  ;; a compose cannot hold it — its include would name no system, an invalid ValueSet (vsd-1, vsd-2;
+  ;; `a;b` used to compile to one). Refused at the term, the message without wrapping.
+  (define (why s)
+    (define e (err-error (vcl->compose s)))
+    (define d (attached-diagnostic e))
+    (list (diagnostic-phase d) (diagnostic-message d)
+          (let ([l (diagnostic-loc d)]) (and l (list (loc-line l) (loc-column l) (loc-span l))))))
+  (check-equal? (why "a;b") '(compile "a code requires a (system) prefix to be compose-expressible: a" (1 1 1)))
+  (check-equal? (why "(http://loinc.org)4548-4; 17856-6")
+                '(compile "a code requires a (system) prefix to be compose-expressible: 17856-6" (1 27 7)))
+  (check-equal? (why "concept << B")
+                '(compile "a filter requires a (system) prefix to be compose-expressible: concept<<B" (1 1 12)))
+  (check-equal? (why "(http://loinc.org)a;(p=x,q=y)")
+                '(compile "a filter requires a (system) prefix to be compose-expressible: p=x" (1 22 3)))
+  (check-equal? (why "B.codeprop")
+                '(compile "a filter requires a (system) prefix to be compose-expressible: B.codeprop" (1 1 10)))
+  (check-equal? (why "((http://a)x)-(y)")
+                '(compile "a code requires a (system) prefix to be compose-expressible: y" (1 16 1)))
+  (check-regexp-match #rx"a code requires a \\(system\\) prefix"
+                      (validation-error-message (err-error (vcl->compose "a;b"))))
+  ;; the system may come from an enclosing group; a value set needs none
+  (check-true (ok? (vcl->compose "(http://loinc.org)(a;(p=x,q=y);(b;c))")))
+  (check-true (ok? (vcl->compose "^http://x.org/vs ; (http://loinc.org)a")))   ; (a URI token eats a `;` that touches it)
+  ;; the other refusals are positioned the same way; an AST not parsed from text has no place
+  (check-equal? (why "(http://a)x;*") '(compile "* requires a (system) prefix to be compose-expressible" (1 13 1)))
+  (check-equal? (why "(http://a)(x;y),(http://a)p=q")
+                '(compile "conjunction of non-filter terms is not compose-expressible: x;y" (1 12 1)))
+  (check-equal? (why "(http://a)x - ((http://a)y - (http://a)z)")
+                '(compile "exclusion is only supported at the top level" (1 26 1)))
+  (check-equal? (caddr (let ([d (attached-diagnostic (err-error (vcl->compose (vcl-code "a"))))])
+                         (list (diagnostic-phase d) (diagnostic-message d) (diagnostic-loc d))))
+                #f)
   ;; print∘parse fixpoint on canonical text
   (define (fix s) (define a (ok-value (parse-vcl s)))
                   (check-equal? (ok-value (parse-vcl (vcl-print a))) a s))

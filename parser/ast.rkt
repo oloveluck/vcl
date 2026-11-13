@@ -17,14 +17,17 @@
 ;;;                              vcl-star | uri-string | vcl-filter-list
 ;;; A VclCodeList is (vcl-code-list (listof string)); a VclFilterList is
 ;;; (vcl-filter-list (listof vcl-filter|vcl-of)).
+;;; A simple term (a code, `*`, `^vs`, a filter) remembers where it stood in the text when the
+;;; parser says (fhir/diagnostic `attached-loc`), so the compiler can point at a term it refuses.
 
-(require racket/contract racket/list racket/match)
+(require racket/contract racket/list racket/match
+         (only-in fhir/diagnostic attach-loc! loc?))
 
 (provide (struct-out vcl-sub) (struct-out vcl-conj) (struct-out vcl-disj) (struct-out vcl-excl)
          (struct-out vcl-code) (struct-out vcl-star) (struct-out vcl-include)
          (struct-out vcl-filter) (struct-out vcl-of)
          (struct-out vcl-code-list) (struct-out vcl-filter-list)
-         (contract-out [lower (-> any/c any/c)]))
+         (contract-out [lower (->* (any/c) ((-> any/c (or/c loc? #f))) any/c)]))
 
 (struct vcl-sub (system expr) #:prefab)
 (struct vcl-conj (exprs) #:prefab)
@@ -45,7 +48,17 @@
         'DESC-LEAF 'descendent-leaf 'EXISTS 'exists))
 
 ;; ---- lower : brag datum -> AST (structural recursion over the rule tree) ----
-(define (lower d)
+;; lower : datum [(datum -> loc|#f)] -> VclExpr   `loc-of` answers where a `simpleExpr` node of the
+;; tree stood (parse.rkt reads it from brag's syntax); without it no term is located
+(define current-loc-of (make-parameter (lambda (d) #f)))
+(define (lower d [loc-of #f])
+  (if loc-of (parameterize ([current-loc-of loc-of]) (lower-node d)) (lower-node d)))
+;; located : datum VclExpr -> VclExpr   the term remembers where its datum stood
+(define (located d node)
+  (define l ((current-loc-of) d))
+  (when l (attach-loc! node l))
+  node)
+(define (lower-node d)
   (match d
     [(list 'vcl e) (lower e)]
     [(list 'expr sub) (lower sub)]
@@ -57,9 +70,9 @@
     [(list 'subExpr "(" e ")") (lower e)]
     [(list 'subExpr (and su (list 'systemUri _ ...)) "(" e ")")
      (vcl-sub (lower-system su) (lower e))]
-    [(list 'simpleExpr "*") (vcl-star)]
-    [(list 'simpleExpr (and c (list 'code _))) (vcl-code (code-str c))]
-    [(list 'simpleExpr inner) (lower inner)]
+    [(list 'simpleExpr "*") (located d (vcl-star))]
+    [(list 'simpleExpr (and c (list 'code _))) (located d (vcl-code (code-str c)))]
+    [(list 'simpleExpr inner) (located d (lower inner))]
     [(list 'includeVs "^" (? string? uri)) (vcl-include uri)]
     [(list 'includeVs "^" (list 'systemUri "(" uri ")")) (vcl-include uri)]
     [(cons 'filter parts) (lower-filter parts)]

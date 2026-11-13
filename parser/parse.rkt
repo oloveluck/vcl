@@ -8,7 +8,7 @@
          (only-in fhir/result/result ok err ok? result?)
          (only-in fhir/result/result invalid-encoding)
          (only-in brag/support token srcloc-token? srcloc-token-token token-struct-type token-struct-val token-struct? token-struct-skip? token-struct-offset)
-         (only-in fhir/diagnostic exn->diagnostic diagnostic->string attach-diagnostic! tokens->last-position error-position))
+         (only-in fhir/diagnostic exn->diagnostic diagnostic->string attach-diagnostic! tokens->last-position error-position loc))
 
 (provide (contract-out [parse-vcl (-> string? result?)]))
 
@@ -29,7 +29,23 @@
                                                   d)))])
                  (define toks (collect (tokenize (open-input-string src))))
                  (set! last-pos (tokens->last-position toks real-position)) (set! toks* toks)
-                 (ok (lower (g:parse-to-datum (let ([ts toks]) (lambda () (if (null? ts) (void) (begin0 (car ts) (set! ts (cdr ts)))))))))))))
+                 (define-values (d locs)
+                   (syntax->datum/locs (g:parse (let ([ts toks]) (lambda () (if (null? ts) (void) (begin0 (car ts) (set! ts (cdr ts)))))))))
+                 (ok (lower d (lambda (node) (hash-ref locs node #f))))))))
+;; syntax->datum/locs : syntax -> (values datum (hasheq datum-node -> loc))   brag's tree as the
+;; datum `lower` reads, and where each simple term (a code, `*`, `^vs`, a filter) stood: the
+;; compiler points there when a compose cannot hold the term (fml's parser does the same for rules)
+(define (syntax->datum/locs stx)
+  (define locs (make-hasheq))
+  (define (walk s)
+    (define l (syntax->list s))
+    (cond [l (define d (map walk l))
+             (when (and (pair? d) (eq? (car d) 'simpleExpr) (syntax-line s))
+               (hash-set! locs d (loc #f (syntax-line s) (let ([c (syntax-column s)]) (and c (add1 c)))
+                                      (syntax-position s) (syntax-span s))))
+             d]
+          [else (syntax-e s)]))
+  (values (walk stx) locs))
 ;; probe-token : token|srcloc-token -> token-struct|#f   (skip tokens excluded)
 (define (probe-token t)
   (define k (if (srcloc-token? t) (srcloc-token-token t) t))
@@ -89,4 +105,10 @@
   ;; diagnostics: the error payload carries one
   (define (diag s) (diagnostic->string (attached-diagnostic (err-error (parse-vcl s)))))
   (check-equal? (diag "(http://loinc.org)concept <<") "<input>:1:27: vcl parse error: the expression ends after `<<`")
-  (check-equal? (diag "(http://loinc.org)concept << ,") "<input>:1:30: vcl parse error: unexpected comma `,`"))
+  (check-equal? (diag "(http://loinc.org)concept << ,") "<input>:1:30: vcl parse error: unexpected comma `,`")
+  ;; each simple term remembers where it stood (line, column, position, span), for the compiler
+  (define (where node) (let ([l (attached-loc node)]) (and l (list (loc-line l) (loc-column l) (loc-position l) (loc-span l)))))
+  (check-equal? (map where (vcl-disj-exprs (p "abc ; (http://loinc.org)d ; concept << B")))
+                (list '(1 1 1 3) #f '(1 29 29 12)))                     ; the middle one is a (system) group…
+  (check-equal? (where (vcl-sub-expr (cadr (vcl-disj-exprs (p "abc ; (http://loinc.org)d ; concept << B")))))
+                '(1 25 25 1)))                                         ; …whose term is located

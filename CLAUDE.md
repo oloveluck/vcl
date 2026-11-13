@@ -51,3 +51,28 @@ the macro raises at the exact character). Also found then, and fixed in fhir-tx:
 `$validate-code`'s `url` input did not compile an unregistered VCL url (the operations' resolver now
 falls back to the implicit VCL ValueSet, as `raco fhir-tx expand` and `%terminologies` did).
 
+**A file that is not there; terms with no system** (2026-11-13). Found writing the manual, each
+with a test that fails without the fix (`tests/cli-test.rkt`, compile.rkt's and cli.rkt's tests):
+- `raco vcl nothere.vcl` compiled the file NAME as an expression (the code `nothere`, its property
+  `vcl`), exit 0. An argument that can only be a file (`file-like?` in cli.rkt: it ends in `.vcl` or
+  has a `/`, and has none of the characters an expression with either needs — brackets, `^`, quotes,
+  operators) is opened as one: with no file, the family's `vcl: cannot read <path>`, exit 2.
+  `(http://example.org/cs)panadol.vcl` and `^http://…/ValueSet/x` are still expressions.
+- `a;b` compiled to includes with no `system`. The grammar makes the `(system)` prefix optional and
+  the specification's examples use it (`A;B`, `concept<<B`, `(10007-3;10008-1)` — the 60 still parse
+  and round-trip; nothing in the parser changed but positions), but a compose include that lists
+  concepts or filters SHALL name their system (FHIR's vsd-1, vsd-2: the family's validator refused
+  the ValueSet `raco vcl` printed). So the COMPILE step refuses a code or a filter that reaches its
+  include with no system (`with-system`: `a code requires a (system) prefix to be
+  compose-expressible: a`); `^valueset` needs none.
+- **Refusals are positioned.** The parser keeps where each simple term stood (parse.rkt
+  `syntax->datum/locs` over brag's syntax, `lower`'s `loc-of`, `attach-loc!` on the term — fml's
+  pattern); compile.rkt raises a Refusal with the term (`refuse`), and the error carries a `compile`
+  diagnostic (`attached-diagnostic`) at the term, or at the first term of a group (`term-loc`), with
+  the message alone (the command line printed `VCL: invalid encoding "vcl: …" (see …)`). All four
+  older refusals go the same way; `validation-error-message` is unchanged. An AST built by hand has
+  no place.
+- `#lang vcl` compiles the expression to its compose when the module is BUILT (base.rkt's
+  `vcl-source` checks `vcl->compose`, not only the parse): a refusal is a syntax error at the term
+  (`a;b`, `*` were a run-time error with a stack trace). workspace.rkt gives a problem that names no
+  file its file (`in-file`: a parse error had none, so the hub could not list it under the file).
