@@ -7,6 +7,10 @@
 ;   * codeList accepts a SINGLE code (`{a}`): the g4 requires two+, but a decompiled compose
 ;     filter with op=in and a one-code value has no other faithful surface form; accepting the
 ;     singleton keeps compose->vcl->compose a fixpoint. Printing always uses the list form.
+; (The lexer reads the g4's URI character set with `+-.` as three characters, not ANTLR's range
+; from `+` to `.`, which would put the comma in a URI: lexer.rkt says why.)
+; This grammar is the specification's port and the error reporter: descent.rkt reads the same
+; language in linear time and hands brag the tokens it does not accept (parse.rkt).
 
 vcl         : expr
 expr        : subExpr [tail]

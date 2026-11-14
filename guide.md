@@ -36,7 +36,9 @@ Two codes from LOINC. Each line below is an expression of its own:
 ```
 In order: a concept and its descendants (an `is-a` filter); its descendants only (`descendent-of`);
 an exclusion (`compose.exclude`); every code of a system; another value set
-(`compose.include.valueSet`); two property filters that must both hold.
+(`compose.include.valueSet`); two property filters that must both hold. Value sets joined by `,`
+(`^http://a/vs , ^http://b/vs`, or with filters) are one include's value sets: the codes in all of
+them (FHIR R5 on; R4 read several value sets of one include as a union).
 
 `;` is or and `,` is and, with no precedence between them: a part mixing them must be bracketed. A
 system in round brackets applies to what follows it, and distributes over a bracketed list. A filter
@@ -51,7 +53,11 @@ is `property op value`, its operators the FHIR filter operators:
 | `~^{a,b}` | `not-in` | `/"regex"` | `regex` |
 | `?true` | `exists` | | |
 
-An expression is one line: the specification forbids newlines.
+An expression is one line: the specification forbids newlines. A code with any character but the
+ASCII letters, digits, `-` and `_` is quoted (`"B.123"`, `"café"`), as the grammar says. A URI
+takes every character of its set up to a space or a bracket, `;`, `}` and `.` included: leave a
+space after one that something follows (`^http://a/vs ; (http://loinc.org)x`), and write a value
+set with a version in brackets, `^(http://a/vs|1.0)`.
 
 ## Worked example
 Hemoglobin A1c, by its two LOINC codes:
@@ -61,7 +67,9 @@ Hemoglobin A1c, by its two LOINC codes:
 It compiles to the compose
 `{"include": [{"system": "http://loinc.org", "concept": [{"code": "4548-4"}, {"code": "17856-6"}]}]}`,
 and its implicit value set url is the expression itself:
-`http://fhir.org/VCL?v1=(http://loinc.org)(4548-4;%2017856-6)`.
+`http://fhir.org/VCL?v1=(http://loinc.org)(4548-4;%2017856-6)`. What a url would not carry back is
+percent-encoded — spaces, `%`, `#`, `&`, `+` and what is not ASCII — the rest left as written, so
+that decoding the url (which the specification requires of a reader) gives the expression.
 
 ## What a compose cannot say
 VCL is wider than `ValueSet.compose`. These parse, but do not compile to a compose, and say so:
@@ -70,6 +78,9 @@ VCL is wider than `ValueSet.compose`. These parse, but do not compile to a compo
 - enumerations joined by `,` (and), `(http://loinc.org)(4548-4; 17856-6), (http://loinc.org)17856-6`:
   a compose can intersect filters, not lists of codes;
 - `*` without a system: a compose names the system it takes every code from;
+- an `exists` filter with a value other than `true` or `false`, `(http://loinc.org)p?maybe`
+  (`an exists filter's value is true or false: p?maybe`);
+- a code holding a comma in a `^{…}` list: the compose writes the list as one comma-separated value;
 - a code or a filter without a system, `4548-4; 17856-6` or `concept<<73211009`: the grammar makes
   the `(system)` prefix optional, but an include that lists codes or filters must name their system
   (`a code requires a (system) prefix to be compose-expressible: 4548-4`, positioned at the code).
@@ -107,8 +118,10 @@ service installed, it lists the enumerated codes and says the rest could not be 
 the code. `query("vcl", "<expression>")` expands an expression without a file.
 
 ## Common problems
-- `lex error: unrecognized text` where a line breaks: an expression is one line (a file may end
-  with a newline, and a `#lang vcl` line before it).
+- `a line break is not permitted in a VCL expression`: an expression is one line (a file may end
+  with a newline, and have a `#lang vcl` line and blank lines before it).
+- `unrecognized text `é` (a code with characters other than A-Z, a-z, 0-9, `-` and `_` is quoted)`:
+  quote the code, `"café"`. In a URI, percent-encode it.
 - `unexpected comma` in `a; b, c`: `;` and `,` have no precedence; bracket one side.
 - `… is not compose-expressible`: see "What a compose cannot say".
 - `a code requires a (system) prefix` in `(http://loinc.org)4548-4; 17856-6`: a system covers the

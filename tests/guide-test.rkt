@@ -78,7 +78,36 @@
   (check-true (hash? (compose-of "^http://hl7.org/fhir/ValueSet/administrative-gender")))   ; a value set needs none
   ;; and the common problems: no precedence between ; and , ; a system outside brackets
   (check-false (ok? (parse-vcl "(http://loinc.org)4548-4;(http://snomed.info/sct)73211009, (http://loinc.org)x")))
-  (check-false (ok? (parse-vcl "http://loinc.org|4548-4"))))
+  (check-false (ok? (parse-vcl "http://loinc.org|4548-4")))
+  ;; added 2026-11-13: exists takes true or false; a code with a comma in a ^{…} list
+  (check-equal? (refusal "(http://loinc.org)p?maybe")
+                "VCL: invalid encoding \"vcl: an exists filter's value is true or false: p?maybe\" (see https://build.fhir.org/ig/FHIR/ig-guidance/vcl.html)")
+  (check-true (string-contains? text "an exists filter's value is true or false: p?maybe"))
+  (check-regexp-match #rx"cannot hold a comma" (refusal "(http://loinc.org)p^{a,\"b,c\"}")))
+
+(test-case "the claims about value sets, URIs, quoting and the url"
+  ;; value sets joined by `,` are one include's value sets
+  (check-equal? (hash-ref (compose-of "^http://a/vs , ^http://b/vs") 'include)
+                (list (hasheq 'valueSet '("http://a/vs" "http://b/vs"))))
+  (check-true (string-contains? text "`^http://a/vs , ^http://b/vs`"))
+  ;; a URI that something follows needs the space; a versioned value set its brackets
+  (check-equal? (length (hash-ref (compose-of "^http://a/vs ; (http://loinc.org)x") 'include)) 2)
+  (check-regexp-match #rx"unexpected open `\\(`" (refusal "^http://a/vs;(http://loinc.org)x"))   ; the URI took the `;`
+  (check-equal? (hash-ref (compose-of "^http://a/vs;^http://b/vs") 'include)
+                (list (hasheq 'valueSet '("http://a/vs;^http://b/vs"))))           ; one long URI
+  (check-equal? (hash-ref (car (hash-ref (compose-of "^(http://a/vs|1.0)") 'include)) 'valueSet) '("http://a/vs|1.0"))
+  ;; quoting what is not an ASCII letter or digit, and the message without the quotes
+  (check-true (hash? (compose-of "(http://a)\"café\"")))
+  (check-true (string-contains? text "unrecognized text `é` (a code with characters other than A-Z, a-z, 0-9, `-` and `_` is quoted)"))
+  (check-regexp-match #rx"unrecognized text `é` \\(a code with characters other than A-Z, a-z, 0-9, `-` and `_` is quoted\\)"
+                      (validation-error-message (err-error (parse-vcl "(http://a)café"))))
+  ;; a line break
+  (check-true (string-contains? text "`a line break is not permitted in a VCL expression`"))
+  (check-regexp-match #rx"a line break is not permitted in a VCL expression"
+                      (validation-error-message (err-error (parse-vcl "(http://a)x;\n(http://a)y"))))
+  ;; the url: spaces, %, #, &, + and what is not ASCII are encoded, the rest as written
+  (check-equal? (hash-ref (ok-value (vcl->valueset "(http://a/b%28c%29)\"x#y&z+é\"")) 'url)
+                "http://fhir.org/VCL?v1=(http://a/b%2528c%2529)\"x%23y%26z%2B%C3%A9\""))
 
 (test-case "the command line reads a #lang vcl file, and places an error on its line"
   (define dir (make-temporary-directory))

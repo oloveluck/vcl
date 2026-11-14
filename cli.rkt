@@ -12,11 +12,11 @@
 
 (require json
          (only-in racket/file file->string)
-         (only-in racket/string string-trim)
          (only-in vcl/compile vcl->valueset)
          (only-in vcl/decompile compose->vcl)
+         (only-in vcl/text file-expression in-file-text with-file)
          (only-in fhir/result/result ok? ok-value err-error validation-error-message)
-         (only-in fhir/diagnostic diagnostic diagnostic-loc loc loc-line loc-position attached-diagnostic emit-diagnostics format-flag))
+         (only-in fhir/diagnostic diagnostic attached-diagnostic emit-diagnostics format-flag))
 
 (provide compile-expression decompile-file file-like?)
 
@@ -28,35 +28,22 @@
   (and (or (regexp-match? #rx"(?i:[.]vcl)$" arg) (regexp-match? #rx"/" arg))
        (not (regexp-match? #rx"[][(){};,=<>^?*\"~!|]" arg))))
 
-;; compile-expression : string -> void   print the ValueSet JSON for a VCL expression, or exit 1
 ;; report : diagnostic text -> exit 1   (format from --format)
 (define current-format (make-parameter 'text))
 (define (report d text)
   (emit-diagnostics (list d) #:format (current-format) #:text-of (lambda (_) text))
   (exit 1))
-(define (with-source d source)
-  (define l (diagnostic-loc d))
-  (struct-copy diagnostic d [loc (if l (struct-copy loc l [source source]) (loc source #f #f #f #f))]))
 
-;; compile-expression : string [source] [#:lines n #:chars k #:text t] -> void   print the ValueSet
-;; JSON for a VCL expression, or exit 1. The expression may have stood after n lines (k characters) of
-;; its file, `t` (a `#lang vcl` line): a diagnostic is moved back to its place there.
-(define (compile-expression expr [source "<expression>"] #:lines [lines 0] #:chars [chars 0] #:text [text expr])
+;; compile-expression : string [source] [#:file-text t] -> void   print the ValueSet JSON for a VCL
+;; expression, or exit 1. Given the text of the file it came from (a `#lang vcl` line, blank lines,
+;; indentation before it: text.rkt), a diagnostic is moved back to its place there.
+(define (compile-expression expr [source "<expression>"] #:file-text [file-text #f])
   (define r (vcl->valueset expr))
   (unless (ok? r)
     (define e (err-error r))
-    (report (shift (with-source (or (attached-diagnostic e)
-                                    (diagnostic 'vcl 'compile 'error (validation-error-message e) #f))
-                                source)
-                   lines chars)
-            text))
+    (define d (or (attached-diagnostic e) (diagnostic 'vcl 'compile 'error (validation-error-message e) #f)))
+    (report (with-file (if file-text (in-file-text d file-text) d) source) (or file-text expr)))
   (displayln (jsexpr->string (ok-value r))))
-(define (shift d lines chars)
-  (define l (diagnostic-loc d))
-  (if (and l (loc-line l) (> lines 0))
-      (struct-copy diagnostic d [loc (struct-copy loc l [line (+ (loc-line l) lines)]
-                                                  [position (and (loc-position l) (+ (loc-position l) chars))])])
-      d))
 
 ;; decompile-file : path-string -> void   print the VCL for a ValueSet (or a bare compose) JSON file
 (define (decompile-file file)
@@ -86,15 +73,10 @@
     [(equal? (car args) "--decompile") (if (= (length args) 2) (decompile-file (cadr args)) (usage))]
     [(regexp-match? #rx"^-" (car args)) (usage)]
     [(or (file-exists? (car args)) (file-like? (car args)))
-     ;; a .vcl file: one expression, an optional #lang line before it, a trailing newline allowed
-     ;; (a file-like argument with no file fails to open: the handler above, exit 2).
-     ;; VCL forbids newlines, so the #lang line is REMOVED (blanking it left a newline the lexer
-     ;; rejects), and a diagnostic is moved back by the lines removed
+     ;; a .vcl file: one expression, perhaps after a #lang line and blank lines (text.rkt); a
+     ;; file-like argument with no file fails to open: the handler above, exit 2
      (define text (file->string (car args)))
-     (define head (let ([m (regexp-match #px"^#lang[^\n]*\n?" text)]) (if m (car m) "")))
-     (define lines (for/sum ([c (in-string head)]) (if (char=? c #\newline) 1 0)))
-     (compile-expression (string-trim (substring text (string-length head)) #px"\\s+$" #:left? #f)
-                         (car args) #:lines lines #:chars (string-length head) #:text text)]
+     (compile-expression (file-expression text) (car args) #:file-text text)]
     [else (compile-expression (car args))]))
 
 (module+ test

@@ -12,12 +12,13 @@
 
 (require racket/contract racket/list racket/string racket/file racket/runtime-path json
          fhir/lang/workspace
-         (only-in fhir/diagnostic diagnostic loc attached-diagnostic exn:fail:diagnostic exn:fail:diagnostic? exn:fail:diagnostic-diagnostic
-                  diagnostic-loc diagnostic-message loc-source loc-line loc-column loc-position)
+         (only-in fhir/diagnostic diagnostic attached-diagnostic exn:fail:diagnostic exn:fail:diagnostic? exn:fail:diagnostic-diagnostic
+                  diagnostic-loc diagnostic-message loc-source loc-line loc-column)
          (only-in fhir/operation apply-operation exn:fail:operation? exn:fail:operation-outcome)
          (only-in fhir/result/result ok? ok-value err-error validation-error-message)
          (only-in "compile.rkt" vcl->compose vcl->valueset)
-         (only-in "decompile.rkt" compose->vcl))
+         (only-in "decompile.rkt" compose->vcl)
+         (only-in "text.rkt" file-expression in-file-text with-file))
 
 (provide (contract-out [workspace-support ws-support?]
                        ;; guide : the language guide (guide.md) a hub serves to agents (learn://vcl)
@@ -26,45 +27,20 @@
 (define-runtime-path guide-file "guide.md")
 (define guide (file->string guide-file))
 
-(define (path-string p) (if (path? p) (path->string p) p))
-(define (expression text) (string-trim (substring text (string-length (prefix text)))))
-;; prefix : string -> string   what stands before the expression in its file: a `#lang` line and
-;; the space after it
-(define (prefix text) (car (regexp-match #px"^(?:#lang[^\n]*)?\\s*" text)))
-;; in-text : diagnostic string -> diagnostic   a problem positioned in the expression, moved to its
-;; place in the file's text (the expression is one line: the lines and the columns before it count)
-(define (in-text d text)
-  (define before (prefix text))
-  (define l (diagnostic-loc d))
-  (define lines (for/sum ([c (in-string before)]) (if (char=? c #\newline) 1 0)))
-  (define indent (string-length (car (regexp-match #px"[^\n]*$" before))))
-  (cond [(or (not l) (not (loc-line l)) (string=? before "")) d]
-        [else (struct-copy diagnostic d
-                           [loc (struct-copy loc l
-                                             [line (+ (loc-line l) lines)]
-                                             [column (and (loc-column l) (+ (loc-column l) indent))]
-                                             [position (and (loc-position l) (+ (loc-position l) (string-length before)))])])]))
-
-;; valueset : workspace path|#f text -> ValueSet   raises the positioned diagnostic
+;; valueset : workspace path|#f text -> ValueSet   raises the diagnostic, positioned in the file
 (define (valueset ws path text)
   (define stem (and path (file-stem path)))
-  (define r (vcl->valueset (expression text)
+  (define r (vcl->valueset (file-expression text)
                            #:url (and path (file-canonical ws "ValueSet" path))
                            #:name (and stem (name-of stem))))
   (cond [(ok? r) (if stem (hash-set* (ok-value r) 'id (id-of stem) 'title stem) (ok-value r))]
         [else (define e (err-error r))
-              (define d (in-file (in-text (or (attached-diagnostic e)
-                                              (diagnostic 'vcl 'compile 'error (validation-error-message e) #f))
-                                          text)
-                                 (and path (path-string path))))
+              ;; the hub finds a file's problems by their source: the diagnostic names the file
+              (define d (with-file (in-file-text (or (attached-diagnostic e)
+                                                     (diagnostic 'vcl 'compile 'error (validation-error-message e) #f))
+                                                 text)
+                                   path))
               (raise (exn:fail:diagnostic (validation-error-message e) (current-continuation-marks) d))]))
-;; in-file : diagnostic string|#f -> diagnostic   a problem that names no file names this one (a
-;; parse error, or a term a compose cannot hold, is positioned in the expression: the hub finds a
-;; file's problems by their source)
-(define (in-file d source)
-  (define l (diagnostic-loc d))
-  (cond [(or (not source) (and l (loc-source l))) d]
-        [else (struct-copy diagnostic d [loc (if l (struct-copy loc l [source source]) (loc source #f #f #f #f))])]))
 (define (id-of stem) (regexp-replace* #rx"[^A-Za-z0-9.-]" stem "-"))
 (define (name-of stem)
   (define parts (regexp-split #rx"[^A-Za-z0-9]+" stem))
@@ -76,7 +52,6 @@
   (for/fold ([rs '()] [ds '()] #:result (values (reverse rs) ds)) ([f (in-list files)])
     (with-handlers ([exn:fail:diagnostic? (lambda (e) (values rs (append ds (list (exn:fail:diagnostic-diagnostic e)))))])
       (values (cons (valueset ws (car f) (cdr f)) rs) ds))))
-(define (exn:fail:diagnostic-diagnostic e) ((dynamic-require 'fhir/diagnostic 'exn:fail:diagnostic-diagnostic) e))
 
 ;; expand : ValueSet -> (values expansion-contains expanded?)
 (define (expand vs)

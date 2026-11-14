@@ -27,7 +27,9 @@
          (struct-out vcl-code) (struct-out vcl-star) (struct-out vcl-include)
          (struct-out vcl-filter) (struct-out vcl-of)
          (struct-out vcl-code-list) (struct-out vcl-filter-list)
-         (contract-out [lower (->* (any/c) ((-> any/c (or/c loc? #f))) any/c)]))
+         (contract-out [lower (->* (any/c) ((-> any/c (or/c loc? #f))) any/c)]
+                       ;; a filter operator's symbol (the FHIR filter-operator code) -> its VCL lexeme
+                       [operator-lexeme (-> symbol? string?)]))
 
 (struct vcl-sub (system expr) #:prefab)
 (struct vcl-conj (exprs) #:prefab)
@@ -42,15 +44,21 @@
 (struct vcl-filter-list (filters) #:prefab)
 
 ;; the g4 operator token -> the FHIR filter-operator symbol
-(define op-of
-  (hash 'EQ '= 'IS-A 'is-a 'IS-NOT-A 'is-not-a 'DESC-OF 'descendent-of 'REGEX 'regex
-        'CARET 'in 'NOT-IN 'not-in 'GENERALIZES 'generalizes 'CHILD-OF 'child-of
-        'DESC-LEAF 'descendent-leaf 'EXISTS 'exists))
+;; The filter operators: each FHIR filter-operator code (https://hl7.org/fhir/valueset-filter-operator.html)
+;; and the VCL lexeme the specification's table gives it. `of` (R6, `source.property`) is the
+;; reversed form, `vcl-of`, and has no entry here.
+(define filter-operators
+  '((= "=") (is-a "<<") (descendent-of "<") (is-not-a "~<<") (regex "/") (in "^") (not-in "~^")
+    (generalizes ">>") (child-of "<!") (descendent-leaf "!!<") (exists "?")))
+(define operator-of-lexeme (for/hash ([o (in-list filter-operators)]) (values (cadr o) (car o))))
+(define lexeme-of-operator (for/hasheq ([o (in-list filter-operators)]) (values (car o) (cadr o))))
+;; operator-lexeme : symbol -> string
+(define (operator-lexeme op) (hash-ref lexeme-of-operator op))
 
 ;; ---- lower : brag datum -> AST (structural recursion over the rule tree) ----
 ;; lower : datum [(datum -> loc|#f)] -> VclExpr   `loc-of` answers where a `simpleExpr` node of the
 ;; tree stood (parse.rkt reads it from brag's syntax); without it no term is located
-(define current-loc-of (make-parameter (lambda (d) #f)))
+(define current-loc-of (make-parameter (lambda (d) #f)))   ; datum -> loc|#f, set by `lower`
 (define (lower d [loc-of #f])
   (if loc-of (parameterize ([current-loc-of loc-of]) (lower-node d)) (lower-node d)))
 ;; located : datum VclExpr -> VclExpr   the term remembers where its datum stood
@@ -103,14 +111,9 @@
     [(list src "." (and p (list 'property _)))
      (vcl-of (lower-of-source src) (prop-str p))]
     [(list-rest (and p (list 'property _)) (? string? op-lexeme) vals)
-     (define op (hash-ref op-of (lexeme->token op-lexeme)))
-     (vcl-filter (prop-str p) op (lower-value (car vals)))]
+     ;; brag hands operator tokens back as their lexeme strings
+     (vcl-filter (prop-str p) (hash-ref operator-of-lexeme op-lexeme) (lower-value (car vals)))]
     [_ (error 'vcl "cannot lower filter: ~s" parts)]))
-
-;; brag hands operator tokens back as their lexeme strings — recover the token identity
-(define (lexeme->token s)
-  (match s ["=" 'EQ] ["<<" 'IS-A] ["~<<" 'IS-NOT-A] ["<" 'DESC-OF] ["/" 'REGEX] ["^" 'CARET]
-           ["~^" 'NOT-IN] [">>" 'GENERALIZES] ["<!" 'CHILD-OF] ["!!<" 'DESC-LEAF] ["?" 'EXISTS]))
 
 (define (lower-value v)
   (match v

@@ -59,6 +59,15 @@
   (check-equal? code3 1)
   (check-equal? (car (lines err3)) "nosystem.vcl:2:1: vcl compile error: a code requires a (system) prefix to be compose-expressible: a"))
 
+(test-case "a file with a blank line after its #lang line is read (it was a lex error at the blank line)"
+  (display-to-file "#lang vcl\n\n  (http://loinc.org)(8480-6; 8462-4)\n" (build-path dir "blank.vcl"))
+  (define-values (code out err) (vcl "blank.vcl"))
+  (check-equal? code 0 err)
+  (display-to-file "#lang vcl\n\n  (http://loinc.org)4548-4; 17856-6\n" (build-path dir "blank-bad.vcl"))
+  (define-values (code2 out2 err2) (vcl "blank-bad.vcl"))
+  (check-equal? code2 1)
+  (check-equal? (car (lines err2)) "blank-bad.vcl:3:29: vcl compile error: a code requires a (system) prefix to be compose-expressible: 17856-6"))
+
 (test-case "a #lang vcl module of codes with no system does not build: a syntax error at the code"
   (define file (build-path dir "nosystem.vcl"))
   (define e (with-handlers ([exn:fail:syntax? values])

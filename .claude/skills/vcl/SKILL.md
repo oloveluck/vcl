@@ -17,7 +17,7 @@ serves as `learn://vcl`). This skill is the workflow around it.
    ```
    <expression>:1:28: vcl parse error: the expression ends after `17856-6`
    ```
-   `raco vcl file.vcl` reads one expression from a file (a `#lang vcl` line before it is allowed);
+   `raco vcl file.vcl` reads one expression from a file (a `#lang vcl` line and blank lines before it are allowed);
    errors are placed on the file's own line. A file name with no file is `vcl: cannot read <path>`,
    exit 2 (it is not compiled as an expression). Codes or filters with no `(system)` are a compile
    error at the term, exit 1 (`a code requires a (system) prefix to be compose-expressible: male`

@@ -134,8 +134,8 @@ round brackets, separated by @litchar{;}. A space after the semicolon is allowed
 codes to one version of the code system.}
 @item{@vcl{(http://loinc.org)4548-4;(http://snomed.info/sct)73211009}: codes from two code systems,
 joined by @litchar{;}.}
-@item{A code with characters a plain code cannot have (a space, a dot) goes in double quotes:
-@vcl{"B.123"}.}]
+@item{A code with characters a plain code cannot have (a space, a dot, a letter outside A to Z)
+goes in double quotes: @vcl{"B.123"}.}]
 
 Always give the code system. The same code can mean different things in different systems, and the
 round brackets around the address are how VCL knows where the address ends: without them
@@ -373,9 +373,10 @@ the language written for an agent to read (fhir-mcp serves it as @tt{learn://vcl
 @itemlist[
 @item{@bold{VCL can say more than a ValueSet can hold.} These are valid VCL, but a ValueSet's
 @tt{compose} has no way to write them, so they are refused with a message that says so: taking
-codes out anywhere but at the top level of the expression; "and" between plain codes, a value set
-or @vcl{*}, or around an "or" in brackets (only rules can be combined with "and"); two different
-code systems inside one "and"; a @vcl{*} with no code system. For example
+codes out anywhere but at the top level of the expression; "and" between plain codes or @vcl{*},
+or around an "or" in brackets (only rules and value sets can be combined with "and"); two different
+code systems inside one "and"; a @vcl{*} with no code system; an @tt{exists} rule (@vcl{p?true})
+whose value is not @tt{true} or @tt{false}; a code holding a comma in a list @vcl{p^{…}}. For example
 @vcl{(http://loinc.org)(4548-4; 17856-6), (http://loinc.org)17856-6} gives
 @tt{conjunction of non-filter terms is not compose-expressible}.}
 @item{@bold{Give the code system.} VCL lets you write a code or a rule with no code system
@@ -396,16 +397,28 @@ a code system that is not at hand expands to no codes, without a warning (@secre
 @item{@bold{Lists of rules.} A list of filters inside @vcl{^{…}} and the source of an @italic{of}
 (@vcl{{concept<B}.prop}) are stored in the ValueSet as VCL text, in the filter's @tt{value}.}
 @item{@bold{The of operator} matches nothing when the terminology tool expands a VCL value set.
-Every other operator expands, @vcl{>>} and @vcl{!!<} included.}
+Every other operator expands, @vcl{>>} and @vcl{!!<} included. It is new in FHIR R6, and the R6
+ballot this family ships (6.0.0-ballot4) does not list it yet: a ValueSet holding an @tt{of} rule,
+or a list of rules inside @vcl{^{…}}, is refused by a validator that checks the operator's code.}
+@item{@bold{Value sets joined by "and"} (@vcl{^http://a/vs , ^http://b/vs}) are one include's value
+sets, which FHIR R5 and later read as the codes in all of them; FHIR R4 read them as a union.}
 @item{@bold{Decompiling loses what VCL cannot say}: a group that has both listed codes and rules
-keeps the codes only; names (displays) and designations of codes, and the compose's @tt{inactive}
-and @tt{lockedDate}, are dropped.}
-@item{@bold{The address.} In the address made from an expression only spaces are escaped (as
-@tt{%20}); other characters are left as written.}
+or value sets keeps the codes only; names (displays) and designations of codes, and the compose's
+@tt{inactive} and @tt{lockedDate}, are dropped.}
+@item{@bold{The address.} In the address made from an expression, what an address would not carry
+back is escaped: spaces, @tt{%}, @tt{#}, @tt{&}, @tt{+} and letters outside ASCII (@tt{%20} for a
+space). Other characters are left as written, as the specification's own example writes them.}
+@item{@bold{A URI runs to a space or a bracket.} The grammar lets a URI hold @tt{;}, @tt{.},
+@tt{-} and @tt["}"] and, after a @tt{|} (a version), any character but a bracket. So a URI that
+something follows needs a space after it, @vcl{^http://a/vs ; (http://loinc.org)x}, and a value set
+with a version goes in brackets, @vcl{^(http://a/vs|1.0)}. A URI with a version as the value of
+@vcl{^} or @vcl{~^} can only end its expression or list. Decompiling writes these forms.}
 @item{@bold{One expression, one line.} A file holds a single expression, and the specification
 does not allow a line break inside it.}
-@item{@bold{One difference from the official grammar}: a list with a single code, @vcl{prop^{a}},
-is accepted here, so that a decompiled value set with a one-code list compiles again.}]
+@item{@bold{Two differences from the official grammar}: a list with a single code, @vcl{prop^{a}},
+is accepted here, so that a decompiled value set with a one-code list compiles again; and a comma
+ends a URI (the grammar's set of URI characters, read as ANTLR reads it, holds the comma, so
+@vcl{p^http://x/vs,q=1} would be one filter whose value set is @tt{http://x/vs,q=1}).}]
 
 @section[#:tag "words"]{Words used here}
 
@@ -480,7 +493,11 @@ with no code system. Such an error carries a @tt{compile} diagnostic (@tt{fhir/d
 @defproc[(vcl->valueset [src string?] [#:url url (or/c string? #f) #f] [#:name name (or/c string? #f) #f]) result?]{
 An active ValueSet. @racket[url] defaults to the implicit VCL url of @racket[src]; @racket[name] to
 @racket["VCLExpression"].}
-@defproc[(vcl-print [ast any/c]) string?]{Canonical text, compound members bracketed.}
+@defproc[(vcl-print [ast any/c]) string?]{Canonical text, compound members bracketed, a URI that
+something follows followed by a space.}
+@defproc[(implicit-url [src string?]) string?]{The implicit value set url of an expression:
+@tt{http://fhir.org/VCL?v1=} and the expression, with spaces, @tt{%}, @tt{#}, @tt{&}, @tt{+} and
+letters outside ASCII percent-encoded, so that decoding it gives the expression back.}
 
 @subsection[#:style 'unnumbered]{@tt{vcl/decompile}}
 @defmodule[vcl/decompile]

@@ -1,37 +1,68 @@
 #lang racket/base
 
 ;;; parse.rkt — string -> Result<VclExpr> (memoized, Result-not-exceptions — the cql pattern).
+;;;
+;;; text -> tokens (lexer.rkt) -> tree -> AST (ast.rkt's `lower`). The tree comes from the
+;;; recursive-descent reading of the grammar (descent.rkt: linear time); when it does not accept the
+;;; tokens, from brag's parser of grammar.rkt, whose error is the diagnostic. A lex error, a parse
+;;; error and an empty text are an `err` carrying an invalid-encoding payload with the positioned
+;;; diagnostic attached (fhir/diagnostic `attached-diagnostic`).
 
 (require racket/contract
          (prefix-in g: "grammar.rkt")
-         "lexer.rkt" "ast.rkt"
-         (only-in fhir/result/result ok err ok? result?)
+         "lexer.rkt" "ast.rkt" "descent.rkt"
+         (only-in fhir/result/result ok err result?)
          (only-in fhir/result/result invalid-encoding)
-         (only-in brag/support token srcloc-token? srcloc-token-token token-struct-type token-struct-val token-struct? token-struct-skip? token-struct-offset)
-         (only-in fhir/diagnostic exn->diagnostic diagnostic->string attach-diagnostic! tokens->last-position error-position loc))
+         (only-in brag/support token token-struct-type token-struct-val token-struct-offset)
+         (only-in fhir/diagnostic diagnostic exn->diagnostic diagnostic->string attach-diagnostic!
+                  tokens->last-position error-position loc))
 
 (provide (contract-out [parse-vcl (-> string? result?)]))
 
-(define cache (make-hash))
+(define spec-url "https://build.fhir.org/ig/FHIR/ig-guidance/vcl.html")
 
+;; the memo: text -> Result. A language server parses at every keystroke and the terminology
+;; service compiles every implicit VCL url it meets, so it is BOUNDED: emptied at its limit
+(define cache (make-hash))
+(define cache-limit 4096)
+
+;; parse-vcl : string -> Result<VclExpr>
 (define (parse-vcl src)
-  (hash-ref! cache src
-             (lambda ()
-               ;; the error message is the positioned one-liner; the diagnostic itself is attached
-               ;; to the payload (attached-diagnostic) for machine-readable output
-               (define last-pos #f) (define toks* '())
-               (with-handlers ([exn:fail? (lambda (e)
-                                            (define d (exn->diagnostic e 'vcl #:last-position last-pos #:unit "expression"
-                                                                       #:ran-out? (ran-out-probe toks* last-pos)))
-                                            (err (attach-diagnostic!
-                                                  (invalid-encoding 'VCL "https://build.fhir.org/ig/FHIR/ig-guidance/vcl.html"
-                                                                    (diagnostic->string d))
-                                                  d)))])
-                 (define toks (collect (tokenize (open-input-string src))))
-                 (set! last-pos (tokens->last-position toks real-position)) (set! toks* toks)
-                 (define-values (d locs)
-                   (syntax->datum/locs (g:parse (let ([ts toks]) (lambda () (if (null? ts) (void) (begin0 (car ts) (set! ts (cdr ts)))))))))
-                 (ok (lower d (lambda (node) (hash-ref locs node #f))))))))
+  (hash-ref cache src
+            (lambda ()
+              (define r (parse-text src))
+              (when (>= (hash-count cache) cache-limit) (hash-clear! cache))
+              (hash-set! cache src r)
+              r)))
+
+;; parse-text : string -> Result<VclExpr>
+(define (parse-text src)
+  (with-handlers ([exn:fail? (lambda (e) (failure (exn->diagnostic e 'vcl)))])
+    (define toks (tokenize src))
+    (cond
+      [(null? toks) (failure (diagnostic 'vcl 'parse 'error "the expression is empty" #f))]
+      [(descend toks) => (lambda (tree+locs) (ok (lower (car tree+locs) (located-in (cdr tree+locs)))))]
+      [else (brag-parse toks)])))
+
+;; brag-parse : (listof Token) -> Result<VclExpr>   the grammar's own parse: its tree, or its error
+;; worded (fhir/diagnostic): "the expression ends after `<<`" when the input ran out, else
+;; "unexpected comma `,`", at the token
+(define (brag-parse toks)
+  (define last-pos (tokens->last-position toks token-struct-offset))
+  (with-handlers ([exn:fail? (lambda (e)
+                               (failure (exn->diagnostic e 'vcl #:last-position last-pos #:unit "expression"
+                                                         #:ran-out? (ran-out-probe toks last-pos))))])
+    (define-values (d locs) (syntax->datum/locs (g:parse (token-thunk toks))))
+    (ok (lower d (located-in locs)))))
+
+;; failure : diagnostic -> err   the error payload, its message the positioned one-liner
+(define (failure d)
+  (err (attach-diagnostic! (invalid-encoding 'VCL spec-url (diagnostic->string d)) d)))
+(define ((located-in locs) node) (hash-ref locs node #f))
+;; token-thunk : (listof Token) -> (-> Token|void)   the tokens, one a call, as brag reads them
+(define (token-thunk toks)
+  (lambda () (if (null? toks) (void) (begin0 (car toks) (set! toks (cdr toks))))))
+
 ;; syntax->datum/locs : syntax -> (values datum (hasheq datum-node -> loc))   brag's tree as the
 ;; datum `lower` reads, and where each simple term (a code, `*`, `^vs`, a filter) stood: the
 ;; compiler points there when a compose cannot hold the term (fml's parser does the same for rules)
@@ -46,27 +77,21 @@
              d]
           [else (syntax-e s)]))
   (values (walk stx) locs))
-;; probe-token : token|srcloc-token -> token-struct|#f   (skip tokens excluded)
-(define (probe-token t)
-  (define k (if (srcloc-token? t) (srcloc-token-token t) t))
-  (and (token-struct? k) (not (token-struct-skip? k)) k))
+
 ;; ran-out-probe : tokens last-position -> (-> boolean)   re-parse with a sentinel token after the
 ;; last one: if the error moves to the sentinel, the input was a valid prefix that ran out
-(define ((ran-out-probe toks last-pos) )
-  ;; the sentinel is a COPY of the last real token (a type the grammar knows), placed after it
-  (define last-real (for/last ([t (in-list toks)] #:when (probe-token t)) (probe-token t)))
-  (and last-pos last-real
+(define ((ran-out-probe toks last-pos))
+  ;; the sentinel is a COPY of the last token (a type the grammar knows), placed after it
+  (define last-tok (car (reverse toks)))
+  (and last-pos
        (with-handlers ([exn:fail? (lambda (e) (let ([p (error-position e)]) (and p (> p last-pos))))])
-         (g:parse-to-datum (let ([ts (append toks (list (token (token-struct-type last-real) (token-struct-val last-real)
-                                                                #:position (+ last-pos 100000) #:line 1 #:column 0)))])
-                             (lambda () (if (null? ts) (void) (begin0 (car ts) (set! ts (cdr ts)))))))
+         (g:parse-to-datum (token-thunk (append toks (list (token (token-struct-type last-tok) (token-struct-val last-tok)
+                                                                  #:position (+ last-pos 100000) #:line 1 #:column 0)))))
          #f)))
-(define (collect next) (let loop ([acc '()]) (define t (next)) (if (void? t) (reverse acc) (loop (cons t acc)))))
-(define (real-position t) (and (token-struct? t) (not (token-struct-skip? t)) (token-struct-offset t)))
 
 (module+ test
-  (require fhir/diagnostic (only-in fhir/result/result err-error))
-  (require rackunit (only-in fhir/result/result ok-value))
+  (require fhir/diagnostic (only-in fhir/result/result err-error ok? ok-value))
+  (require rackunit (only-in racket/string string-join))
   (define (p s) (ok-value (parse-vcl s)))
   ;; the spec's Examples table, as AST shapes
   (check-equal? (p "B") (vcl-code "B"))
@@ -106,9 +131,27 @@
   (define (diag s) (diagnostic->string (attached-diagnostic (err-error (parse-vcl s)))))
   (check-equal? (diag "(http://loinc.org)concept <<") "<input>:1:27: vcl parse error: the expression ends after `<<`")
   (check-equal? (diag "(http://loinc.org)concept << ,") "<input>:1:30: vcl parse error: unexpected comma `,`")
+  ;; no expression at all (brag's words for it were "unexpected no-tokens `#f`", as fhirpath's were)
+  (check-equal? (diag "") "vcl parse error: the expression is empty")
+  (check-equal? (diag " \t ") "vcl parse error: the expression is empty")
   ;; each simple term remembers where it stood (line, column, position, span), for the compiler
   (define (where node) (let ([l (attached-loc node)]) (and l (list (loc-line l) (loc-column l) (loc-position l) (loc-span l)))))
   (check-equal? (map where (vcl-disj-exprs (p "abc ; (http://loinc.org)d ; concept << B")))
                 (list '(1 1 1 3) #f '(1 29 29 12)))                     ; the middle one is a (system) group…
   (check-equal? (where (vcl-sub-expr (cadr (vcl-disj-exprs (p "abc ; (http://loinc.org)d ; concept << B")))))
-                '(1 25 25 1)))                                         ; …whose term is located
+                '(1 25 25 1))                                          ; …whose term is located
+  ;; a value set of several thousand enumerated codes parses in well under a second (brag alone:
+  ;; 1.4 s for 800, quadratic)
+  (define codes (for/list ([k 5000]) (format "~a-~a" (+ 10000 k) (modulo k 10))))
+  (define big (string-append "(http://loinc.org)(" (string-join codes ";") ")"))
+  (define t0 (current-inexact-milliseconds))
+  (check-equal? (length (vcl-disj-exprs (vcl-sub-expr (p big)))) 5000)
+  (check-true (< (- (current-inexact-milliseconds) t0) 1000)))
+
+;; brag's own tree and places, for tests/descent-test.rkt (which holds descent.rkt to it)
+(module+ grammar-tree
+  (provide brag-tree)
+  ;; brag-tree : (listof Token) -> (cons Tree Locs)   raises when the grammar does not accept them
+  (define (brag-tree toks)
+    (define-values (d locs) (syntax->datum/locs (g:parse (token-thunk toks))))
+    (cons d locs)))

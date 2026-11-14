@@ -82,3 +82,62 @@ before compiling and reported a problem at the expression's line 1 — one line 
 `in-text` moves it by what stood before the expression (`prefix`: the `#lang` line, blank lines,
 indentation), as the command line already did.
 
+
+**Quality, performance and specification pass** (2026-11-13). The specification page's source
+(FHIR/ig-guidance `input/pagecontent/vcl.md`; build.fhir.org itself was not reachable) was read
+again: the grammar and the 60 examples are byte-identical to the vendored ones (SOURCE.txt files
+say so). Held to a dump of everything the package gives over the 60 examples and ~90 probes
+(AST, print and reparse, compose, decompile and the law, ValueSet, editor and workspace
+diagnostics): every difference is one named below. Tests 238 -> 338.
+- **Parsing is linear** (`parser/descent.rkt`, `descend`). brag's parser is quadratic in a flat
+  list: 800 enumerated codes took 1.4 s, 4,000 about half a minute (a bench of several thousand
+  never finished). The grammar is LL(3), so it is read directly, rule by rule, producing brag's own
+  tree and the `simpleExpr` places `lower` reads; it only ever ACCEPTS — on any token it does not
+  expect it answers #f and `parse.rkt` hands the tokens to brag (`brag-parse`), whose error is the
+  diagnostic, so every message is brag's as before. 800 codes 2 ms, 8,000 23 ms; compile, print
+  and decompile were already linear (8,000: 2-3 ms each). `tests/descent-test.rkt`: the two
+  parsers agree, tree and places, on the 60 examples and 1,500 generated expressions (1,183
+  accepted by both, 317 refused by both; it fails on a planted off-by-one). The memo is bounded
+  (`cache-limit`, emptied at 4,096 texts: the terminology service compiles every implicit url).
+- **The lexer** (`lexer.rkt`, now `tokenize : string -> (listof Token)`, positions from `lexer`'s
+  own start/end, no srcloc wrapping, no WS tokens): letters and digits are ASCII's, as the g4 writes
+  them (BEHAVIOUR: `café` unquoted and `http://ä.org` were accepted; the spec: codes with other
+  characters are quoted, URIs percent-encoded); the g4's `+-.` inside the URI set is read as three
+  characters, not ANTLR's range that holds the comma (unchanged behaviour, now said). A lex error
+  quotes the text from the character that failed (it quoted what FOLLOWED it, `` `` `` for `@`),
+  and says the three mistakes it can tell: a line break (`a line break is not permitted in a VCL
+  expression`), a quoted value that does not end or holds another escape, an unquoted non-ASCII
+  letter. An empty text is `the expression is empty` (brag's `unexpected no-tokens `#f``), as
+  fhirpath says it.
+- **The printer is its own module** (`print.rkt`, `vcl-print`, still provided by compile.rkt too),
+  with ONE operator table (`filter-operators` in ast.rkt, `operator-lexeme`; ast.rkt had two,
+  compile.rkt a third) and one bracketing function (`member-text`: `group` and `print-member` were
+  the same). BEHAVIOUR (each broke print∘parse or the decompile law): a URI that something follows
+  is printed with a space after it (`followed`, `ends-in-uri?`: `^vs ;…`, `{p^uri }`, `uri .p`; it
+  was read back as one long URI, or not at all); a value set with a version as `^(uri|v)` (the
+  version tail takes any character but a bracket); a URI-looking value after an operator other than
+  `^`/`~^` is quoted (a decompiled `p=http://x/y` did not parse).
+- **Compile** (compile.rkt): BEHAVIOUR — an `exists` value other than true/false is refused at the
+  term (the g4's comment, FHIR's filter.value); a code holding a comma in a `^{…}` list is refused
+  (the compose's value is one comma-separated list); value sets in a conjunction are one include's
+  `valueSet` list, with its filters (`conj->include`: R5 on, an include's value sets intersect;
+  they were refused as "non-filter terms"); the implicit url (`implicit-url`, now provided)
+  percent-encodes `%`, whitespace, `#`, `&`, `+` and non-ASCII so that decoding gives the
+  expression back (the spec: a reader SHALL percent-decode; `(http://x/a%28b%29)c` came back as
+  `(http://x/a(b))c`, which does not lex) and leaves the rest as the spec's own example writes it.
+- **Decompile** (decompile.rkt): BEHAVIOUR — an include's value sets are a conjunction, with its
+  filters (`valueSet: [a, b]` printed `^a;^b`, which recompiled to ONE value set
+  `http://a;^http://b`; filters dropped the value sets); a compose with no include and a nested
+  list that is not VCL are said (`cdr`/`ok-value` contract violations).
+- **One reading of a `.vcl` file's text** (`text.rkt`: `file-expression`, `in-file-text`,
+  `with-file`) for cli.rkt (`shift`, its own head stripping, `with-source`), workspace.rkt
+  (`prefix`, `in-text`, `in-file`) and support.rkt (`blank-lang-line` + trim). BEHAVIOUR: the
+  editor put a problem in a `#lang vcl` file a line or more early (always line 1); `raco vcl`
+  refused a blank line after `#lang vcl` (a lex error at it). workspace.rkt lost a module-level
+  redefinition of an imported `exn:fail:diagnostic-diagnostic` through `dynamic-require`.
+- Decided against / left: a conjunction around a disjunction (`p=x,(q=y;r=z)`) is refused though
+  it distributes into includes (DNF; the text would not round-trip and can grow exponentially);
+  `^vs,^vs` is read with R5's intersection (R4 said union); `(s)(a;b),^vs` (codes AND a value set,
+  which a compose can hold) stays refused; a versioned URI as a `^` value can only end its list
+  (the grammar has no bracketed form there); `of` and nested filter lists are not in FHIR R6
+  ballot4's filter-operator codes (the manual's Limits say so).

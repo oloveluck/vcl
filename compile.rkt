@@ -1,12 +1,15 @@
 #lang racket/base
 
-;;; compile.rkt — VclExpr -> ValueSet.compose (jsexpr), and the printer back to VCL text.
+;;; compile.rkt — VclExpr -> ValueSet.compose (jsexpr), and the ValueSet with its implicit url.
+;;; (The printer back to VCL text is print.rkt; `vcl-print` is provided here as well.)
 ;;;
 ;;; The compose mapping (https://build.fhir.org/ig/FHIR/ig-guidance/vcl.html "VCL Structure"):
 ;;;   top-level exclusion  -> compose.exclude entries (its removed side, same mapping as include)
 ;;;   disjunction          -> separate include entries (compose includes UNION)
-;;;   conjunction          -> ONE include with several filters (compose filters AND);
-;;;                           conjoining code enumerations is not compose-expressible -> err
+;;;   conjunction          -> ONE include with several filters (compose filters AND) and value
+;;;                           sets (`^a,^b`: an include's value sets intersect, FHIR R5 on — R4
+;;;                           said union); conjoining code enumerations is not compose-expressible
+;;;                           -> err
 ;;;   (system) prefix      -> include.system (+.version from a |version suffix)
 ;;;   codes                -> include.concept ; within one system group a disjunction of codes
 ;;;                           collapses into one include's concept list
@@ -18,7 +21,10 @@
 ;;;                           form carries the expression textually)
 ;;;
 ;;; Not compose-expressible (clear errs, never silent): exclusion below the top level,
-;;; conjunction of enumerations, `*` with no system, and a code or a filter with no system — the
+;;; conjunction of enumerations, `*` with no system, an `exists` filter whose value is not `true`
+;;; or `false` (the g4: "only true and false are valid codes here"; FHIR's filter.value says the
+;;; same), a code holding a comma in a `^{…}`/`~^{…}` list (the compose writes the list as one
+;;; comma-separated value), and a code or a filter with no system — the
 ;;; grammar makes the (system) prefix optional (the specification's examples write `A;B` and
 ;;; `concept<<B`), but a compose include that lists concepts or filters SHALL name their system
 ;;; (FHIR's vsd-1 and vsd-2), so the ValueSet would be invalid. Each refusal is a `compile`
@@ -28,6 +34,7 @@
 (require racket/contract racket/string racket/list racket/match
          json
          "parser/ast.rkt"
+         "print.rkt"
          (only-in "parser/parse.rkt" parse-vcl)
          (only-in fhir/result/result ok err ok? ok-value result? result-bind invalid-encoding)
          (only-in fhir/diagnostic diagnostic attach-diagnostic! attached-loc))
@@ -36,7 +43,10 @@
  (contract-out
   [vcl->compose  (-> (or/c string? any/c) result?)]     ; text or AST -> Result<compose jsexpr>
   [vcl->valueset (->* (string?) (#:url (or/c string? #f) #:name (or/c string? #f)) result?)]
-  [vcl-print     (-> any/c string?)]))                  ; AST -> canonical VCL text
+  [vcl-print     (-> any/c string?)]                    ; AST -> canonical VCL text (print.rkt)
+  ;; the implicit value set url of an expression: http://fhir.org/VCL?v1= and the expression,
+  ;; percent-encoded where a url would not carry it back
+  [implicit-url  (-> string? string?)]))
 
 (define spec-url "https://build.fhir.org/ig/FHIR/ig-guidance/vcl.html")
 (define (vcl-err msg) (err (invalid-encoding 'VCL spec-url msg)))
@@ -113,14 +123,18 @@
        '())
    (append-map (lambda (b) (branch->includes b sys)) others)))
 
-;; a conjunction: every conjunct must be a filter (compose ANDs filters within an include)
+;; a conjunction: every conjunct is a filter or a value set (an include ANDs its filters, and its
+;; value sets with them and with each other)
 (define (conj->include es sys)
-  (define fs (for/list ([e (in-list es)])
-               (match (strip-sub e)
-                 [(and f (or (vcl-filter _ _ _) (vcl-of _ _))) (filter->jsexpr f)]
-                 [other (refuse other "conjunction of non-filter terms is not compose-expressible: ~a"
-                                (vcl-print other))])))
-  (with-system (conj-system es sys) (car es) (hasheq 'filter fs)))
+  (define-values (fs vss)
+    (for/fold ([fs '()] [vss '()] #:result (values (reverse fs) (reverse vss))) ([e (in-list es)])
+      (match (strip-sub e)
+        [(and f (or (vcl-filter _ _ _) (vcl-of _ _))) (values (cons (filter->jsexpr f) fs) vss)]
+        [(vcl-include vs) (values fs (cons vs vss))]
+        [other (refuse other "conjunction of non-filter terms is not compose-expressible: ~a"
+                       (vcl-print other))])))
+  (with-system (conj-system es sys) (car es)
+    (for/hasheq ([k (in-list '(filter valueSet))] [v (in-list (list fs vss))] #:when (pair? v)) (values k v))))
 
 ;; a conjunction's system: an inherited one, or a single agreed (system) prefix on its terms
 (define (conj-system es sys)
@@ -156,6 +170,10 @@
 ;; a filter -> {property, op, value}; structured values serialize per the compose conventions
 (define (filter->jsexpr f)
   (match f
+    [(vcl-filter _ 'exists (and v (not (or "true" "false"))))
+     (refuse f "an exists filter's value is true or false: ~a" (vcl-print f))]
+    [(vcl-filter _ (or 'in 'not-in) (vcl-code-list (list _ ... (? (lambda (c) (string-contains? c ",")) c) _ ...)))
+     (refuse f "a code in a ^{…} list cannot hold a comma (the compose writes the list as one comma-separated value): ~s" c)]
     [(vcl-filter prop op v)
      (hasheq 'property prop 'op (symbol->string op) 'value (filter-value v))]
     [(vcl-of source prop)
@@ -175,60 +193,33 @@
       (ok (drop-empty
            (hasheq 'resourceType "ValueSet"
                    'status "active"
-                   'url (or url (string-append "http://fhir.org/VCL?v1="
-                                               (string-replace src " " "%20")))
+                   'url (or url (implicit-url src))
                    'name (or name "VCLExpression")
                    'compose compose))))))
 
-;; ---- print (AST -> canonical VCL text) ----------------------------------------
-(define op-sym
-  (hash '= "=" 'is-a "<<" 'is-not-a "~<<" 'descendent-of "<" 'regex "/" 'in "^" 'not-in "~^"
-        'generalizes ">>" 'child-of "<!" 'descendent-leaf "!!<" 'exists "?"))
-
-(define (vcl-print a)
-  (match a
-    [(vcl-sub (cons u v) inner)
-     (format "(~a~a)~a" u (if v (string-append "|" v) "") (group inner))]
-    ;; the spec defines NO precedence between , and ; — a compound member must re-bracket
-    [(vcl-conj es) (string-join (map print-member es) ",")]
-    [(vcl-disj es) (string-join (map print-member es) ";")]
-    [(vcl-excl b r) (format "(~a)-(~a)" (vcl-print b) (vcl-print r))]
-    [(vcl-code c) (print-code c)]
-    [(vcl-star) "*"]
-    [(vcl-include t) (string-append "^" t)]
-    [(vcl-filter prop op v)
-     (string-append (print-code prop) (hash-ref op-sym op) (print-value op v))]
-    [(vcl-of source prop) (string-append (print-of-source source) "." (print-code prop))]
-    [(vcl-code-list codes) (format "{~a}" (string-join (map print-code codes) ","))]
-    [(vcl-filter-list fs) (format "{~a}" (string-join (map vcl-print fs) ","))]))
-
-;; a compound expr under a system prefix prints inside brackets
-(define (group inner)
-  (match inner
-    [(or (vcl-conj _) (vcl-disj _) (vcl-excl _ _)) (format "(~a)" (vcl-print inner))]
-    [_ (vcl-print inner)]))
-
-;; a conjunction/disjunction member that is itself compound re-brackets
-(define (print-member e)
-  (match e
-    [(or (vcl-conj _) (vcl-disj _) (vcl-excl _ _)) (format "(~a)" (vcl-print e))]
-    [_ (vcl-print e)]))
-
-(define (print-value op v)
-  (match v
-    [(? string? s) (if (memq op '(regex)) (quote-str s) (print-code-or-uri s))]
-    [_ (vcl-print v)]))
-(define (print-of-source s)
-  (match s [(? string?) s] [(vcl-code c) (print-code c)] [_ (vcl-print s)]))
-(define (print-code-or-uri s) (if (regexp-match? #px"^[a-zA-Z]+:" s) s (print-code s)))
-;; a code prints bare when it is a simple SCODE, quoted otherwise
-(define (print-code c)
-  (if (regexp-match? #px"^[a-zA-Z0-9][-_a-zA-Z0-9]*$" c) c (quote-str c)))
-(define (quote-str s)
-  (format "\"~a\"" (string-replace (string-replace s "\\" "\\\\") "\"" "\\\"")))
+;; ---- the implicit url ----------------------------------------------------------------
+;; implicit-url : string -> string   `http://fhir.org/VCL?v1=` and the expression, percent-encoded
+;; where a url would not carry it back: the specification says the expression part "is
+;; percent-encoded" and that a reader SHALL percent-decode it, so what decodes must be the
+;; expression. Encoded: `%` (a URI in VCL holds its own %-escapes — `%28` for a bracket — which a
+;; decoder would otherwise turn into the bracket), whitespace and what is not ASCII (a url holds
+;; neither), `#` (it ends a url's query), `&` and `+` (a query's parameter separator, a form's
+;; space). The rest stays as written, as the specification's own example writes it
+;; (`http://fhir.org/VCL?v1=(http://loinc.org)(parent^{LP46821-2,LP259418-4})`). Until 2026-11-13
+;; only spaces were encoded.
+(define (implicit-url src)
+  (string-append "http://fhir.org/VCL?v1=" (percent-encode src)))
+(define (percent-encode s)
+  (apply string-append
+         (for/list ([c (in-string s)])
+           (if (or (char<=? c #\space) (char>? c #\~) (memv c '(#\% #\# #\& #\+)))
+               (apply string-append (for/list ([b (in-bytes (string->bytes/utf-8 (string c)))])
+                                      (string-append "%" (string-upcase (if (< b 16) (format "0~x" b) (format "~x" b))))))
+               (string c)))))
 
 (module+ test
   (require rackunit
+           (only-in net/uri-codec uri-decode)
            (only-in fhir/result/result err-error validation-error-message)
            (only-in fhir/diagnostic attached-diagnostic diagnostic-phase diagnostic-message diagnostic-loc
                     loc-line loc-column loc-span))
@@ -303,6 +294,30 @@
   (check-equal? (caddr (let ([d (attached-diagnostic (err-error (vcl->compose (vcl-code "a"))))])
                          (list (diagnostic-phase d) (diagnostic-message d) (diagnostic-loc d))))
                 #f)
+  ;; an exists filter takes true or false (the g4's comment; FHIR's filter.value): `p?maybe` compiled
+  (check-true (ok? (vcl->compose "(http://a)p?false")))
+  (check-equal? (why "(http://a)p?maybe") '(compile "an exists filter's value is true or false: p?maybe" (1 11 7)))
+  ;; a code of an in-list holding a comma would split when the compose's value is read back
+  (check-equal? (why "(http://a)p^{x,\"y,z\"}")
+                '(compile "a code in a ^{…} list cannot hold a comma (the compose writes the list as one comma-separated value): \"y,z\"" (1 11 11)))
+  ;; value sets in a conjunction are one include's value sets (they intersect, FHIR R5 on), with its
+  ;; filters; they were refused as "non-filter terms"
+  (check-equal? (C "^http://v/a , ^http://v/b")
+                (hasheq 'include (list (hasheq 'valueSet '("http://v/a" "http://v/b")))))
+  (check-equal? (C "(http://a)(p=x, ^http://v/a)")
+                (hasheq 'include (list (hasheq 'system "http://a" 'filter (list (hasheq 'property "p" 'op "=" 'value "x"))
+                                               'valueSet '("http://v/a")))))
+  (check-equal? (why "(http://a)(x, ^http://v/a)")
+                '(compile "conjunction of non-filter terms is not compose-expressible: x" (1 12 1)))
+  ;; the implicit url decodes to the expression (the specification: a reader SHALL percent-decode
+  ;; it); `%`, `#`, `&`, `+`, spaces and what is not ASCII are encoded, the rest left as the
+  ;; specification's own example writes it
+  (check-equal? (implicit-url "(http://loinc.org)(parent^{LP46821-2,LP259418-4})")
+                "http://fhir.org/VCL?v1=(http://loinc.org)(parent^{LP46821-2,LP259418-4})")
+  (check-equal? (implicit-url "(http://x.org/a%28b%29)c ; (http://y.org/s?a=1&b=2#f)\"d+é\"")
+                "http://fhir.org/VCL?v1=(http://x.org/a%2528b%2529)c%20;%20(http://y.org/s?a=1%26b=2%23f)\"d%2B%C3%A9\"")
+  (for ([e (in-list '("(http://x.org/a%28b%29)c" "(http://a)p=\"x y\" , q=\"é+&#%\"" "(http://loinc.org)(4548-4; 17856-6)"))])
+    (check-equal? (uri-decode (substring (implicit-url e) (string-length "http://fhir.org/VCL?v1="))) e))
   ;; print∘parse fixpoint on canonical text
   (define (fix s) (define a (ok-value (parse-vcl s)))
                   (check-equal? (ok-value (parse-vcl (vcl-print a))) a s))
