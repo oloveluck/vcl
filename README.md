@@ -1,8 +1,8 @@
 # vcl — ValueSet Compose Language
 
-> Part of [fhir](https://github.com/oloveluck/fhir), a FHIR implementation designed to be used by
-> AI agents: one line per problem, at its place, with what would fix it; a guide written for an
-> agent to read; the same language inside the `fhir-mcp` workspace.
+> Part of [fhir](https://github.com/oloveluck/fhir), a toolkit for AI agents on FHIR: an
+> agent reads and writes FHIR's languages, and the JSON is what they compile to. A value set in
+> VCL is 28% of the tokens of the compose it stands for; a mistake is one line, at its term.
 
 A *value set* is a named set of codes: "the lab tests used to follow diabetes", "the codes that
 mean a parent". FHIR writes one as a ValueSet resource, a page of JSON.
